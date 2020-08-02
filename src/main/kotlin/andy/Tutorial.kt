@@ -16,6 +16,7 @@ class HelloTriangleApplication {
     private var window: Long = 0
     private lateinit var instance: VkInstance
     private var debugMessenger: Long = 0
+    private lateinit var physicalDevice: VkPhysicalDevice
 
     fun run() {
         initWindow()
@@ -44,11 +45,47 @@ class HelloTriangleApplication {
     private fun initVulkan() {
         createInstance()
         setupDebugMessenger()
+        pickPhysicalDevice()
     }
 
     private fun mainLoop() {
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents()
+        }
+    }
+
+    private fun pickPhysicalDevice() {
+        MemoryStack.stackPush().use { stack ->
+            val deviceCount = stack.ints(0)
+            vkEnumeratePhysicalDevices(instance, deviceCount, null)
+            if (deviceCount[0] == 0) {
+                throw RuntimeException("Failed find GPUs with Vulkan support")
+            }
+            val ppPhysicalDevices = stack.mallocPointer(deviceCount[0])
+            vkEnumeratePhysicalDevices(instance, deviceCount, ppPhysicalDevices)
+            physicalDevice = ppPhysicalDevices.asIterable()
+                    .map { VkPhysicalDevice(it, instance) }
+                    .firstOrNull { isDeviceSuitable(it) }
+                    ?: throw RuntimeException("Failed to find a suitable GPU")
+
+        }
+    }
+
+    private fun isDeviceSuitable(device: VkPhysicalDevice): Boolean {
+        return findQueueFamilies(device).isComplete()
+    }
+
+    private fun findQueueFamilies(device: VkPhysicalDevice): QueueFamilyIndices {
+        MemoryStack.stackPush().use { stack ->
+            val queueFamilyCount = stack.ints(0)
+            vkGetPhysicalDeviceQueueFamilyProperties(device, queueFamilyCount, null)
+            val queueFamilies = VkQueueFamilyProperties.mallocStack(queueFamilyCount[0], stack)
+            vkGetPhysicalDeviceQueueFamilyProperties(device, queueFamilyCount, queueFamilies)
+            return QueueFamilyIndices().apply {
+                graphicsFamily = queueFamilies
+                        .map { it.queueFlags() }
+                        .firstOrNull { (it and VK_QUEUE_GRAPHICS_BIT) != 0 }
+            }
         }
     }
 
@@ -153,7 +190,7 @@ class HelloTriangleApplication {
         private const val WIDTH = 800
         private const val HEIGHT = 600
 
-        private val ENABLE_VALIDATION_LAYERS = false // DEBUG.get(true)
+        private val ENABLE_VALIDATION_LAYERS = false //DEBUG.get(true)
         private val VALIDATION_LAYERS = HashSet<String>().apply {
             if (ENABLE_VALIDATION_LAYERS) {
                 add("VK_LAYER_KHRONOS_validation")
@@ -187,6 +224,30 @@ class HelloTriangleApplication {
         private fun destroyDebugUtilsMessengerEXT(instance: VkInstance, debugMessenger: Long, allocationCallbacks: VkAllocationCallbacks?) {
             if (vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT") != NULL) {
                 vkDestroyDebugUtilsMessengerEXT(instance, debugMessenger, allocationCallbacks)
+            }
+        }
+    }
+
+    inner class QueueFamilyIndices {
+        var graphicsFamily: Int? = null
+
+        fun isComplete() = graphicsFamily != null
+    }
+}
+
+internal fun PointerBuffer.asIterable(): Iterable<Long> {
+    return object : Iterable<Long> {
+        override fun iterator() = object : Iterator<Long> {
+            private var index = 0
+            override fun hasNext() = index < capacity()
+            override fun next(): Long {
+                if (index < capacity()) {
+                    val result = get(index)
+                    index++
+                    return result
+                } else {
+                    throw NoSuchElementException(index.toString())
+                }
             }
         }
     }
