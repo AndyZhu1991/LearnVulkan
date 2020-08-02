@@ -2,12 +2,14 @@ package andy
 
 import org.lwjgl.PointerBuffer
 import org.lwjgl.glfw.GLFW.*
+import org.lwjgl.glfw.GLFWVulkan.glfwCreateWindowSurface
 import org.lwjgl.glfw.GLFWVulkan.glfwGetRequiredInstanceExtensions
-import org.lwjgl.system.Configuration.DEBUG
 import org.lwjgl.system.MemoryStack
 import org.lwjgl.system.MemoryUtil.NULL
 import org.lwjgl.vulkan.*
 import org.lwjgl.vulkan.EXTDebugUtils.*
+import org.lwjgl.vulkan.KHRSurface.vkDestroySurfaceKHR
+import org.lwjgl.vulkan.KHRSurface.vkGetPhysicalDeviceSurfaceSupportKHR
 import org.lwjgl.vulkan.VK10.*
 import java.nio.LongBuffer
 
@@ -16,9 +18,11 @@ class HelloTriangleApplication {
     private var window: Long = 0
     private lateinit var instance: VkInstance
     private var debugMessenger: Long = 0
+    private var surface: Long = 0
     private lateinit var physicalDevice: VkPhysicalDevice
     private lateinit var device: VkDevice
     private lateinit var graphicsQueue: VkQueue
+    private lateinit var presentQueue: VkQueue
 
     fun run() {
         initWindow()
@@ -47,6 +51,7 @@ class HelloTriangleApplication {
     private fun initVulkan() {
         createInstance()
         setupDebugMessenger()
+        createSurface()
         pickPhysicalDevice()
         createLogicDevice()
     }
@@ -74,6 +79,16 @@ class HelloTriangleApplication {
         }
     }
 
+    private fun createSurface() {
+        MemoryStack.stackPush().use { stack ->
+            val pSurface = stack.longs(VK_NULL_HANDLE)
+            if (glfwCreateWindowSurface(instance, window, null, pSurface) != VK_SUCCESS) {
+                throw RuntimeException("Failed to create window surface")
+            }
+            surface = pSurface[0]
+        }
+    }
+
     private fun isDeviceSuitable(device: VkPhysicalDevice): Boolean {
         return findQueueFamilies(device).isComplete()
     }
@@ -84,27 +99,45 @@ class HelloTriangleApplication {
             vkGetPhysicalDeviceQueueFamilyProperties(device, queueFamilyCount, null)
             val queueFamilies = VkQueueFamilyProperties.mallocStack(queueFamilyCount[0], stack)
             vkGetPhysicalDeviceQueueFamilyProperties(device, queueFamilyCount, queueFamilies)
-            return QueueFamilyIndices().apply {
-                graphicsFamily = queueFamilies
-                        .map { it.queueFlags() }
-                        .firstOrNull { (it and VK_QUEUE_GRAPHICS_BIT) != 0 }
+
+            val indices = QueueFamilyIndices()
+            for (i in 0 until queueFamilies.capacity()) {
+                if ((queueFamilies[i].queueFlags() and VK_QUEUE_GRAPHICS_BIT) != 0) {
+                    indices.graphicsFamily = i
+                    break
+                }
             }
+            val presentSupport = stack.ints(0)
+            for (i in 0 until queueFamilies.capacity()) {
+                vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, presentSupport)
+                if (presentSupport[0] == VK_TRUE) {
+                    indices.presentFamily = i
+                    break
+                }
+            }
+            return indices
         }
     }
 
     private fun createLogicDevice() {
         MemoryStack.stackPush().use { stack ->
             val indices = findQueueFamilies(physicalDevice)
-            val queueCreateInfo = VkDeviceQueueCreateInfo.callocStack(1, stack)
-            queueCreateInfo.sType(VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO)
-            queueCreateInfo.queueFamilyIndex(indices.graphicsFamily!!)
-            queueCreateInfo.pQueuePriorities(stack.floats(1.0f))
+            val uniqueQueueFamilies = indices.unique()
+
+            val queueCreateInfos = VkDeviceQueueCreateInfo.callocStack(uniqueQueueFamilies.size, stack)
+
+            for (i in uniqueQueueFamilies.indices) {
+                val queueCreateInfo = queueCreateInfos[i]
+                queueCreateInfo.sType(VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO)
+                queueCreateInfo.queueFamilyIndex(indices.graphicsFamily!!)
+                queueCreateInfo.pQueuePriorities(stack.floats(1.0f))
+            }
 
             val deviceFeatures = VkPhysicalDeviceFeatures.callocStack(stack)
             val createInfo = VkDeviceCreateInfo.callocStack(stack)
 
             createInfo.sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO)
-            createInfo.pQueueCreateInfos(queueCreateInfo)
+            createInfo.pQueueCreateInfos(queueCreateInfos)
             createInfo.pEnabledFeatures(deviceFeatures)
 
             if (ENABLE_VALIDATION_LAYERS) {
@@ -118,9 +151,11 @@ class HelloTriangleApplication {
             }
 
             device = VkDevice(pDevice[0], physicalDevice, createInfo)
-            val pGraphicsQueue = stack.pointers(VK_NULL_HANDLE)
-            vkGetDeviceQueue(device, indices.graphicsFamily!!, 0, pGraphicsQueue)
-            graphicsQueue = VkQueue(pGraphicsQueue[0], device)
+            val pQueue = stack.pointers(VK_NULL_HANDLE)
+            vkGetDeviceQueue(device, indices.graphicsFamily!!, 0, pQueue)
+            graphicsQueue = VkQueue(pQueue[0], device)
+            vkGetDeviceQueue(device, indices.presentFamily!!, 0, pQueue)
+            presentQueue = VkQueue(pQueue[0], device)
         }
     }
 
@@ -132,6 +167,7 @@ class HelloTriangleApplication {
             destroyDebugUtilsMessengerEXT(instance, debugMessenger, null)
         }
 
+        vkDestroySurfaceKHR(instance, surface, null)
         vkDestroyInstance(instance, null)
         glfwDestroyWindow(window)
         glfwTerminate()
@@ -268,8 +304,22 @@ class HelloTriangleApplication {
 
     inner class QueueFamilyIndices {
         var graphicsFamily: Int? = null
+        var presentFamily: Int? = null
 
-        fun isComplete() = graphicsFamily != null
+        private fun allFamilies(): List<Int?> {
+            return listOf(graphicsFamily, presentFamily)
+        }
+
+        fun isComplete(): Boolean {
+            return allFamilies().all { it != null }
+        }
+
+        fun unique(): IntArray {
+            return allFamilies()
+                    .map { it!! }
+                    .distinct()
+                    .toIntArray()
+        }
     }
 }
 
