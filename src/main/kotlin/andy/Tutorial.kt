@@ -17,6 +17,8 @@ class HelloTriangleApplication {
     private lateinit var instance: VkInstance
     private var debugMessenger: Long = 0
     private lateinit var physicalDevice: VkPhysicalDevice
+    private lateinit var device: VkDevice
+    private lateinit var graphicsQueue: VkQueue
 
     fun run() {
         initWindow()
@@ -46,6 +48,7 @@ class HelloTriangleApplication {
         createInstance()
         setupDebugMessenger()
         pickPhysicalDevice()
+        createLogicDevice()
     }
 
     private fun mainLoop() {
@@ -89,7 +92,42 @@ class HelloTriangleApplication {
         }
     }
 
+    private fun createLogicDevice() {
+        MemoryStack.stackPush().use { stack ->
+            val indices = findQueueFamilies(physicalDevice)
+            val queueCreateInfo = VkDeviceQueueCreateInfo.callocStack(1, stack)
+            queueCreateInfo.sType(VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO)
+            queueCreateInfo.queueFamilyIndex(indices.graphicsFamily!!)
+            queueCreateInfo.pQueuePriorities(stack.floats(1.0f))
+
+            val deviceFeatures = VkPhysicalDeviceFeatures.callocStack(stack)
+            val createInfo = VkDeviceCreateInfo.callocStack(stack)
+
+            createInfo.sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO)
+            createInfo.pQueueCreateInfos(queueCreateInfo)
+            createInfo.pEnabledFeatures(deviceFeatures)
+
+            if (ENABLE_VALIDATION_LAYERS) {
+                createInfo.ppEnabledLayerNames(validationLayerAsPointBuffer())
+            }
+
+            val pDevice = stack.pointers(VK_NULL_HANDLE)
+
+            if (vkCreateDevice(physicalDevice, createInfo, null, pDevice) != VK_SUCCESS) {
+                throw RuntimeException("Failed to create logic device")
+            }
+
+            device = VkDevice(pDevice[0], physicalDevice, createInfo)
+            val pGraphicsQueue = stack.pointers(VK_NULL_HANDLE)
+            vkGetDeviceQueue(device, indices.graphicsFamily!!, 0, pGraphicsQueue)
+            graphicsQueue = VkQueue(pGraphicsQueue[0], device)
+        }
+    }
+
     private fun cleanup() {
+
+        vkDestroyDevice(device, null)
+
         if (ENABLE_VALIDATION_LAYERS) {
             destroyDebugUtilsMessengerEXT(instance, debugMessenger, null)
         }
