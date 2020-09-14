@@ -8,10 +8,13 @@ import org.lwjgl.system.MemoryStack
 import org.lwjgl.system.MemoryUtil.NULL
 import org.lwjgl.vulkan.*
 import org.lwjgl.vulkan.EXTDebugUtils.*
-import org.lwjgl.vulkan.KHRSurface.vkDestroySurfaceKHR
-import org.lwjgl.vulkan.KHRSurface.vkGetPhysicalDeviceSurfaceSupportKHR
+import org.lwjgl.vulkan.KHRSurface.*
+import org.lwjgl.vulkan.KHRSwapchain.*
 import org.lwjgl.vulkan.VK10.*
+import java.lang.Integer.min
+import java.nio.IntBuffer
 import java.nio.LongBuffer
+import kotlin.math.max
 
 class HelloTriangleApplication {
 
@@ -21,8 +24,14 @@ class HelloTriangleApplication {
     private var surface: Long = 0
     private lateinit var physicalDevice: VkPhysicalDevice
     private lateinit var device: VkDevice
+
     private lateinit var graphicsQueue: VkQueue
     private lateinit var presentQueue: VkQueue
+
+    private var swapChain: Long = 0
+    private lateinit var swapChainImages: List<Long>
+    private var swapChainImageFormat: Int = 0
+    private lateinit var swapChainExtent: VkExtent2D
 
     fun run() {
         initWindow()
@@ -90,7 +99,51 @@ class HelloTriangleApplication {
     }
 
     private fun isDeviceSuitable(device: VkPhysicalDevice): Boolean {
-        return findQueueFamilies(device).isComplete()
+        val indices = findQueueFamilies(device)
+        val extensionsSupported = checkDeviceExtensionSupport(device)
+        var swapChainAdequate = false
+        if (extensionsSupported) {
+            MemoryStack.stackPush().use { stack ->
+                val swapChainSupport = querySwapChainSupport(device, stack)
+                swapChainAdequate = swapChainSupport.formats.hasRemaining() && swapChainSupport.presentModes.hasRemaining()
+            }
+        }
+
+        return indices.isComplete() && extensionsSupported && swapChainAdequate
+    }
+
+    private fun checkDeviceExtensionSupport(device: VkPhysicalDevice): Boolean {
+        MemoryStack.stackPush().use { stack ->
+            val extensionCount = stack.ints(0)
+            vkEnumerateDeviceExtensionProperties(device, null as String?, extensionCount, null)
+            val availableExtensions = VkExtensionProperties.mallocStack(extensionCount[0], stack)
+            vkEnumerateDeviceExtensionProperties(device, null as String?, extensionCount, availableExtensions)
+            return availableExtensions
+                    .map { it.extensionNameString() }
+                    .containsAll(DEVICE_EXTENSIONS)
+        }
+    }
+
+    private fun querySwapChainSupport(device: VkPhysicalDevice, stack: MemoryStack): SwapChainSupportDetails {
+        val details = SwapChainSupportDetails()
+
+        details.capabilities = VkSurfaceCapabilitiesKHR.mallocStack(stack)
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, details.capabilities)
+
+        val count = stack.ints(0)
+        vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, count, null)
+        if (count[0] != 0) {
+            details.formats = VkSurfaceFormatKHR.mallocStack(count[0], stack)
+            vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, count, details.formats)
+        }
+
+        vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, count, null)
+        if (count[0] != 0) {
+            details.presentModes = stack.mallocInt(count[0])
+            vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, count, details.presentModes)
+        }
+
+        return details
     }
 
     private fun findQueueFamilies(device: VkPhysicalDevice): QueueFamilyIndices {
@@ -134,14 +187,14 @@ class HelloTriangleApplication {
             }
 
             val deviceFeatures = VkPhysicalDeviceFeatures.callocStack(stack)
-            val createInfo = VkDeviceCreateInfo.callocStack(stack)
-
-            createInfo.sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO)
-            createInfo.pQueueCreateInfos(queueCreateInfos)
-            createInfo.pEnabledFeatures(deviceFeatures)
-
-            if (ENABLE_VALIDATION_LAYERS) {
-                createInfo.ppEnabledLayerNames(validationLayerAsPointBuffer())
+            val createInfo = VkDeviceCreateInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO)
+                pQueueCreateInfos(queueCreateInfos)
+                pEnabledFeatures(deviceFeatures)
+                ppEnabledExtensionNames(asPointBuffer(DEVICE_EXTENSIONS))
+                if (ENABLE_VALIDATION_LAYERS) {
+                    ppEnabledLayerNames(asPointBuffer(VALIDATION_LAYERS))
+                }
             }
 
             val pDevice = stack.pointers(VK_NULL_HANDLE)
@@ -193,7 +246,7 @@ class HelloTriangleApplication {
                 pApplicationInfo(appInfo)
                 ppEnabledExtensionNames(getRequiredExtensions())
                 if (ENABLE_VALIDATION_LAYERS) {
-                    ppEnabledLayerNames(validationLayerAsPointBuffer())
+                    ppEnabledLayerNames(asPointBuffer(VALIDATION_LAYERS))
                     val debugCreateInfo = VkDebugUtilsMessengerCreateInfoEXT.callocStack(stack)
                     populateDebugMessengerCreateInfo(debugCreateInfo)
                     pNext(debugCreateInfo.address())
@@ -260,7 +313,109 @@ class HelloTriangleApplication {
         }
     }
 
+    private fun createSwapChain() {
+        MemoryStack.stackPush().use { stack ->
+            val swapChainSupportDetails = querySwapChainSupport(physicalDevice, stack)
+
+            val surfaceFormat = chooseSwapSurfaceFormat(swapChainSupportDetails.formats)
+            val presentMode = chooseSwapPresentMode(swapChainSupportDetails.presentModes)
+            val extent = chooseSwapExtent(swapChainSupportDetails.capabilities)
+
+            val imageCount = stack.ints(swapChainSupportDetails.capabilities.minImageCount() + 1)
+
+            if (swapChainSupportDetails.capabilities.maxImageCount() > 0
+                    && swapChainSupportDetails.capabilities.maxImageCount() < imageCount[0]) {
+                imageCount.put(0, swapChainSupportDetails.capabilities.maxImageCount())
+            }
+
+            val createInfo = VkSwapchainCreateInfoKHR.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR)
+                surface(surface)
+
+                // Image settings
+                minImageCount(imageCount[0])
+                imageFormat(surfaceFormat.format())
+                imageColorSpace(surfaceFormat.colorSpace())
+                imageExtent(extent)
+                imageArrayLayers(1)
+                imageUsage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
+
+                val indices = findQueueFamilies(physicalDevice)
+                if (indices.graphicsFamily != (indices.presentFamily)) {
+                    imageSharingMode(VK_SHARING_MODE_CONCURRENT)
+                    pQueueFamilyIndices(stack.ints(indices.graphicsFamily!!, indices.presentFamily!!))
+                } else {
+                    imageSharingMode(VK_SHARING_MODE_EXCLUSIVE)
+                }
+
+                preTransform(swapChainSupportDetails.capabilities.currentTransform())
+                compositeAlpha(VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
+                presentMode(presentMode)
+                clipped(true)
+
+                oldSwapchain(VK_NULL_HANDLE)
+            }
+
+            val pSwapChain = stack.longs(VK_NULL_HANDLE)
+
+            if (vkCreateSwapchainKHR(device, createInfo, null, pSwapChain) != VK_SUCCESS) {
+                throw RuntimeException("Failed to create swap chain")
+            }
+
+            val swapChain = pSwapChain[0]
+            vkGetSwapchainImagesKHR(device, swapChain, imageCount, null)
+            val pSwapChainImages = stack.mallocLong(imageCount[0])
+            vkGetSwapchainImagesKHR(device, swapChain, imageCount, pSwapChainImages)
+            swapChainImages = ArrayList<Long>(imageCount[0]).apply {
+                for (i in 0 until pSwapChainImages.capacity()) {
+                    add(pSwapChainImages[i])
+                }
+            }
+            swapChainImageFormat = surfaceFormat.format()
+            swapChainExtent = VkExtent2D.create().set(extent)
+        }
+    }
+
+    private fun chooseSwapSurfaceFormat(availableFormats: VkSurfaceFormatKHR.Buffer): VkSurfaceFormatKHR {
+        return availableFormats
+                .filter { it.format() == VK_FORMAT_B8G8R8_UNORM }
+                .firstOrNull { it.colorSpace() == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR }
+                ?: availableFormats[0]
+    }
+
+    private fun chooseSwapPresentMode(availablePresentModes: IntBuffer): Int {
+        for (i in 0 until availablePresentModes.capacity()) {
+            if (availablePresentModes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
+                return VK_PRESENT_MODE_MAILBOX_KHR
+            }
+        }
+        return VK_PRESENT_MODE_FIFO_KHR
+    }
+
+    private fun chooseSwapExtent(capabilities: VkSurfaceCapabilitiesKHR): VkExtent2D {
+        if (capabilities.currentExtent().width() != UINT_MAX) {
+            return capabilities.currentExtent()
+        }
+
+        val actualExtent = VkExtent2D.mallocStack().set(WIDTH, HEIGHT)
+
+        val minExtent = capabilities.minImageExtent()
+        val maxExtent = capabilities.maxImageExtent()
+
+        actualExtent.width(clamp(minExtent.width(), maxExtent.width(), actualExtent.width()))
+        actualExtent.height(clamp(minExtent.height(), maxExtent.height(), actualExtent.height()))
+
+        return actualExtent
+    }
+
+    private fun clamp(min: Int, max: Int, value: Int): Int {
+        return max(min, min(max, value))
+    }
+
     companion object {
+
+        private const val UINT_MAX = (0xFFFFFFFF).toInt()
+
         private const val WIDTH = 800
         private const val HEIGHT = 600
 
@@ -272,12 +427,14 @@ class HelloTriangleApplication {
             }
         }
 
-        private fun validationLayerAsPointBuffer(): PointerBuffer {
+        private val DEVICE_EXTENSIONS = setOf(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
+
+        private fun asPointBuffer(strings: Collection<String>): PointerBuffer {
             val stack = MemoryStack.stackGet()
-            val buffer = stack.mallocPointer(VALIDATION_LAYERS.size)
-            VALIDATION_LAYERS
-                    .map { stack.UTF8(it) }
-                    .forEach { buffer.put(it) }
+            val buffer = stack.mallocPointer(strings.size)
+            strings.forEach {
+                buffer.put(stack.UTF8(it))
+            }
             return buffer.rewind()
         }
 
@@ -302,7 +459,7 @@ class HelloTriangleApplication {
         }
     }
 
-    inner class QueueFamilyIndices {
+    internal class QueueFamilyIndices {
         var graphicsFamily: Int? = null
         var presentFamily: Int? = null
 
@@ -320,6 +477,18 @@ class HelloTriangleApplication {
                     .distinct()
                     .toIntArray()
         }
+
+        fun array(): IntArray {
+            return allFamilies()
+                    .map { it!! }
+                    .toIntArray()
+        }
+    }
+
+    internal class SwapChainSupportDetails {
+        lateinit var capabilities: VkSurfaceCapabilitiesKHR
+        lateinit var formats: VkSurfaceFormatKHR.Buffer
+        lateinit var presentModes: IntBuffer
     }
 }
 
