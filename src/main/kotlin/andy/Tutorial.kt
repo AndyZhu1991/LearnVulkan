@@ -29,7 +29,8 @@ class HelloTriangleApplication {
     private lateinit var presentQueue: VkQueue
 
     private var swapChain: Long = 0
-    private lateinit var swapChainImages: List<Long>
+    private var swapChainImages: List<Long> = emptyList()
+    private var swapChainImageViews: List<Long> = emptyList()
     private var swapChainImageFormat: Int = 0
     private lateinit var swapChainExtent: VkExtent2D
 
@@ -63,6 +64,8 @@ class HelloTriangleApplication {
         createSurface()
         pickPhysicalDevice()
         createLogicDevice()
+        createSwapChain()
+        createImageViews()
     }
 
     private fun mainLoop() {
@@ -214,6 +217,8 @@ class HelloTriangleApplication {
 
     private fun cleanup() {
 
+        swapChainImageViews.forEach { vkDestroyImageView(device, it, null) }
+        vkDestroySwapchainKHR(device, swapChain, null)
         vkDestroyDevice(device, null)
 
         if (ENABLE_VALIDATION_LAYERS) {
@@ -310,6 +315,37 @@ class HelloTriangleApplication {
                 throw RuntimeException("Failed to set up debug messenger")
             }
             debugMessenger = pDebugMessenger[0]
+        }
+    }
+
+    private fun createImageViews() {
+        MemoryStack.stackPush().use { stack ->
+            val pImageView = stack.mallocLong(1)
+            swapChainImageViews = swapChainImages.map { swapChainImage ->
+                val createInfo = VkImageViewCreateInfo.callocStack(stack).apply {
+                    sType(VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO)
+                    image(swapChainImage)
+                    viewType(VK_IMAGE_VIEW_TYPE_2D)
+                    format(swapChainImageFormat)
+
+                    components().r(VK_COMPONENT_SWIZZLE_IDENTITY)
+                    components().g(VK_COMPONENT_SWIZZLE_IDENTITY)
+                    components().b(VK_COMPONENT_SWIZZLE_IDENTITY)
+                    components().a(VK_COMPONENT_SWIZZLE_IDENTITY)
+
+                    subresourceRange().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                    subresourceRange().baseMipLevel(0)
+                    subresourceRange().levelCount(1)
+                    subresourceRange().baseArrayLayer(0)
+                    subresourceRange().layerCount(1)
+                }
+
+                if (vkCreateImageView(device, createInfo, null, pImageView) != VK_SUCCESS) {
+                    throw RuntimeException("Failed to create image views.")
+                }
+
+                pImageView[0]
+            }
         }
     }
 
