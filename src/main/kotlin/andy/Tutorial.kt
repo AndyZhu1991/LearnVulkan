@@ -66,6 +66,7 @@ class HelloTriangleApplication {
         createLogicDevice()
         createSwapChain()
         createImageViews()
+        createGraphicsPipeline()
     }
 
     private fun mainLoop() {
@@ -316,6 +317,10 @@ class HelloTriangleApplication {
             }
             debugMessenger = pDebugMessenger[0]
         }
+    }
+
+    private fun createGraphicsPipeline() {
+
     }
 
     private fun createImageViews() {
