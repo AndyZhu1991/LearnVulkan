@@ -25,6 +25,7 @@ dependencies {
     implementation("org.lwjgl", "lwjgl-openal")
     implementation("org.lwjgl", "lwjgl-stb")
     implementation("org.lwjgl", "lwjgl-vulkan")
+    implementation("org.lwjgl", "lwjgl-shaderc")
     runtimeOnly("org.lwjgl", "lwjgl", classifier = lwjglNatives)
     runtimeOnly("org.lwjgl", "lwjgl-assimp", classifier = lwjglNatives)
     runtimeOnly("org.lwjgl", "lwjgl-glfw", classifier = lwjglNatives)

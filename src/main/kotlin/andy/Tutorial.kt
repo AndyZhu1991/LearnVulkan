@@ -12,6 +12,7 @@ import org.lwjgl.vulkan.KHRSurface.*
 import org.lwjgl.vulkan.KHRSwapchain.*
 import org.lwjgl.vulkan.VK10.*
 import java.lang.Integer.min
+import java.nio.ByteBuffer
 import java.nio.IntBuffer
 import java.nio.LongBuffer
 import kotlin.math.max
@@ -320,7 +321,58 @@ class HelloTriangleApplication {
     }
 
     private fun createGraphicsPipeline() {
+        MemoryStack.stackPush().use { stack ->
+            val vertShaderSPIRV = compileShaderFile("shader/09_shader_base.vert", ShakerKind.VERTEX_SHADER)
+            val fragShaderSPIRV = compileShaderFile("shader/09_shader_base.frag", ShakerKind.FRAGMENT_SHADER)
 
+            if (vertShaderSPIRV == null || fragShaderSPIRV == null) {
+                throw RuntimeException("Failed to compile shader.")
+            }
+
+            val vertShaderModule = createShaderModule(vertShaderSPIRV.bytecode)
+            val fragShaderModule = createShaderModule(fragShaderSPIRV.bytecode)
+
+            val entryPoint = stack.UTF8("main")
+
+            val shaderStages = VkPipelineShaderStageCreateInfo.callocStack(2, stack)
+
+            val vertShaderStageInfo = shaderStages[0].apply {
+                sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
+                stage(VK_SHADER_STAGE_VERTEX_BIT)
+                module(vertShaderModule)
+                pName(entryPoint)
+            }
+
+            val fragShaderStageInfo = shaderStages[1].apply {
+                sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
+                stage(VK_SHADER_STAGE_FRAGMENT_BIT)
+                module(fragShaderModule)
+                pName(entryPoint)
+            }
+
+            vkDestroyShaderModule(device, vertShaderModule, null)
+            vkDestroyShaderModule(device, fragShaderModule, null)
+
+            vertShaderSPIRV.free()
+            fragShaderSPIRV.free()
+        }
+    }
+
+    private fun createShaderModule(spirvCode: ByteBuffer): Long {
+        MemoryStack.stackPush().use { stack ->
+            val createInfo = VkShaderModuleCreateInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO)
+                pCode(spirvCode)
+            }
+
+            val pShaderModule = stack.mallocLong(1)
+
+            if (vkCreateShaderModule(device, createInfo, null, pShaderModule) != VK_SUCCESS) {
+                throw RuntimeException("Failed to create shader module.")
+            }
+
+            return pShaderModule[0]
+        }
     }
 
     private fun createImageViews() {
