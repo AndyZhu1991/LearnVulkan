@@ -35,6 +35,8 @@ class HelloTriangleApplication {
     private var swapChainImageFormat: Int = 0
     private lateinit var swapChainExtent: VkExtent2D
 
+    private var pipelineLayout: Long = 0
+
     fun run() {
         initWindow()
         initVulkan()
@@ -219,6 +221,7 @@ class HelloTriangleApplication {
 
     private fun cleanup() {
 
+        vkDestroyPipelineLayout(device, pipelineLayout, null)
         swapChainImageViews.forEach { vkDestroyImageView(device, it, null) }
         vkDestroySwapchainKHR(device, swapChain, null)
         vkDestroyDevice(device, null)
@@ -322,8 +325,8 @@ class HelloTriangleApplication {
 
     private fun createGraphicsPipeline() {
         MemoryStack.stackPush().use { stack ->
-            val vertShaderSPIRV = compileShaderFile("shader/09_shader_base.vert", ShakerKind.VERTEX_SHADER)
-            val fragShaderSPIRV = compileShaderFile("shader/09_shader_base.frag", ShakerKind.FRAGMENT_SHADER)
+            val vertShaderSPIRV = compileShaderFile("shaders/09_shader_base.vert", ShakerKind.VERTEX_SHADER)
+            val fragShaderSPIRV = compileShaderFile("shaders/09_shader_base.frag", ShakerKind.FRAGMENT_SHADER)
 
             if (vertShaderSPIRV == null || fragShaderSPIRV == null) {
                 throw RuntimeException("Failed to compile shader.")
@@ -349,6 +352,81 @@ class HelloTriangleApplication {
                 module(fragShaderModule)
                 pName(entryPoint)
             }
+
+            // VERTEX STAGE
+            val vertexInputInfo = VkPipelineVertexInputStateCreateInfo.callocStack(stack)
+            vertexInputInfo.sType(VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO)
+
+            // ASSEMBLE STAGE
+            val inputAssembly = VkPipelineInputAssemblyStateCreateInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO)
+                topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+                primitiveRestartEnable(false)
+            }
+
+            // VIEWPORT & SCISSOR
+            val viewport = VkViewport.callocStack(1, stack)
+            viewport.x(0f)
+            viewport.y(0f)
+            viewport.width(swapChainExtent.width().toFloat())
+            viewport.height(swapChainExtent.height().toFloat())
+            viewport.minDepth(0f)
+            viewport.maxDepth(1f)
+
+            val scissor = VkRect2D.callocStack(1, stack)
+            scissor.offset(VkOffset2D.callocStack(stack).set(0, 0))
+            scissor.extent(swapChainExtent)
+
+            val viewportState = VkPipelineViewportStateCreateInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO)
+                pViewports(viewport)
+                pScissors(scissor)
+            }
+
+            // RASTERIZATION STAGE
+            val rasterizer = VkPipelineRasterizationStateCreateInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO)
+                depthClampEnable(false)
+                rasterizerDiscardEnable(false)
+                polygonMode(VK_POLYGON_MODE_FILL)
+                lineWidth(1f)
+                cullMode(VK_CULL_MODE_BACK_BIT)
+                frontFace(VK_FRONT_FACE_CLOCKWISE)
+                depthBiasEnable(false)
+            }
+
+            // MULTISAMPLING
+            val multisampling = VkPipelineMultisampleStateCreateInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO)
+                sampleShadingEnable(false)
+                rasterizationSamples(VK_SAMPLE_COUNT_1_BIT)
+            }
+
+            // COLOR BLENDING
+            val colorBlendAttachment = VkPipelineColorBlendAttachmentState.callocStack(1, stack)
+            colorBlendAttachment.colorWriteMask(VK_COLOR_COMPONENT_R_BIT and VK_COLOR_COMPONENT_G_BIT
+                    and VK_COLOR_COMPONENT_B_BIT and VK_COLOR_COMPONENT_A_BIT)
+            colorBlendAttachment.blendEnable(false)
+
+            val colorBlending = VkPipelineColorBlendStateCreateInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO)
+                logicOpEnable(false)
+                logicOp(VK_LOGIC_OP_COPY)
+                pAttachments(colorBlendAttachment)
+                blendConstants(stack.floats(0f, 0f, 0f, 0f))
+            }
+
+            // PIPELINE LAYOUT CREATION
+            val pipelineLayoutInfo = VkPipelineLayoutCreateInfo.callocStack(stack)
+            pipelineLayoutInfo.sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
+
+            val pPipelineLayout = stack.longs(VK_NULL_HANDLE)
+
+            if (vkCreatePipelineLayout(device, pipelineLayoutInfo, null, pPipelineLayout) != VK_SUCCESS) {
+                throw RuntimeException("Failed to create pipeline layout.")
+            }
+
+            pipelineLayout = pPipelineLayout[0]
 
             vkDestroyShaderModule(device, vertShaderModule, null)
             vkDestroyShaderModule(device, fragShaderModule, null)
