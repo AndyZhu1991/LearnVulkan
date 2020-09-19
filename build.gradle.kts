@@ -31,6 +31,7 @@ dependencies {
     runtimeOnly("org.lwjgl", "lwjgl-glfw", classifier = lwjglNatives)
     runtimeOnly("org.lwjgl", "lwjgl-openal", classifier = lwjglNatives)
     runtimeOnly("org.lwjgl", "lwjgl-stb", classifier = lwjglNatives)
+    runtimeOnly("org.lwjgl", "lwjgl-shaderc", classifier = lwjglNatives)
 }
 
 configure<JavaPluginConvention> {
