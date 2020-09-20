@@ -37,6 +37,7 @@ class HelloTriangleApplication {
 
     private var renderPass: Long = 0
     private var pipelineLayout: Long = 0
+    private var graphicsPipeline: Long = 0
 
     fun run() {
         initWindow()
@@ -223,6 +224,7 @@ class HelloTriangleApplication {
 
     private fun cleanup() {
 
+        vkDestroyPipeline(device, graphicsPipeline, null)
         vkDestroyPipelineLayout(device, pipelineLayout, null)
         swapChainImageViews.forEach { vkDestroyImageView(device, it, null) }
         vkDestroySwapchainKHR(device, swapChain, null)
@@ -429,6 +431,30 @@ class HelloTriangleApplication {
             }
 
             pipelineLayout = pPipelineLayout[0]
+
+            val pipelineInfo = VkGraphicsPipelineCreateInfo.callocStack(1, stack).apply {
+                it.sType(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO)
+                it.pStages(shaderStages)
+                it.pVertexInputState(vertexInputInfo)
+                it.pVertexInputState(vertexInputInfo)
+                it.pInputAssemblyState(inputAssembly)
+                it.pViewportState(viewportState)
+                it.pRasterizationState(rasterizer)
+                it.pMultisampleState(multisampling)
+                it.pColorBlendState(colorBlending)
+                it.layout(pipelineLayout)
+                it.renderPass(renderPass)
+                it.subpass(0)
+                it.basePipelineHandle(VK_NULL_HANDLE)
+                it.basePipelineIndex(-1)
+            }
+
+            val pGraphicsPipeline = stack.mallocLong(1)
+            if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, pipelineInfo, null, pGraphicsPipeline) != VK_SUCCESS) {
+                throw RuntimeException("Failed to create graphics pipeline.")
+            }
+
+            graphicsPipeline = pGraphicsPipeline[0]
 
             vkDestroyShaderModule(device, vertShaderModule, null)
             vkDestroyShaderModule(device, fragShaderModule, null)
