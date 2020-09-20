@@ -35,6 +35,7 @@ class HelloTriangleApplication {
     private var swapChainImageFormat: Int = 0
     private lateinit var swapChainExtent: VkExtent2D
 
+    private var renderPass: Long = 0
     private var pipelineLayout: Long = 0
 
     fun run() {
@@ -69,6 +70,7 @@ class HelloTriangleApplication {
         createLogicDevice()
         createSwapChain()
         createImageViews()
+        createRenderPass()
         createGraphicsPipeline()
     }
 
@@ -433,6 +435,44 @@ class HelloTriangleApplication {
 
             vertShaderSPIRV.free()
             fragShaderSPIRV.free()
+        }
+    }
+
+    private fun createRenderPass() {
+        MemoryStack.stackPush().use { stack ->
+            val colorAttachment = VkAttachmentDescription.callocStack(1, stack)
+            colorAttachment.format(swapChainImageFormat)
+            colorAttachment.samples(VK_SAMPLE_COUNT_1_BIT)
+            colorAttachment.loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR)
+            colorAttachment.storeOp(VK_ATTACHMENT_STORE_OP_STORE)
+            colorAttachment.stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+            colorAttachment.stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+            colorAttachment.initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
+            colorAttachment.finalLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+
+            val colorAttachmentRef = VkAttachmentReference.callocStack(1, stack).apply {
+                it.attachment(0)
+                it.layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+            }
+
+            val subpass = VkSubpassDescription.callocStack(1, stack).apply {
+                it.pipelineBindPoint(VK_PIPELINE_BIND_POINT_GRAPHICS)
+                it.colorAttachmentCount(1)
+                it.pColorAttachments(colorAttachmentRef)
+            }
+
+            val renderPassInfo = VkRenderPassCreateInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO)
+                pAttachments(colorAttachment)
+                pSubpasses(subpass)
+            }
+
+            val renderPasses = stack.mallocLong(1)
+            if (vkCreateRenderPass(device, renderPassInfo, null, renderPasses) != VK_SUCCESS) {
+                throw RuntimeException("Failed to create render pass.")
+            }
+
+            renderPass = renderPasses[0]
         }
     }
 
