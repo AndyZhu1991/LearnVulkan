@@ -40,6 +40,9 @@ class HelloTriangleApplication {
     private var pipelineLayout: Long = 0
     private var graphicsPipeline: Long = 0
 
+    private var commandPool: Long = 0
+    private var commandBuffers: List<VkCommandBuffer> = emptyList()
+
     fun run() {
         initWindow()
         initVulkan()
@@ -75,6 +78,8 @@ class HelloTriangleApplication {
         createRenderPass()
         createGraphicsPipeline()
         createFrameBuffers()
+        createCommandPool()
+        createCommandBuffers()
     }
 
     private fun mainLoop() {
@@ -226,6 +231,7 @@ class HelloTriangleApplication {
 
     private fun cleanup() {
 
+        vkDestroyCommandPool(device, commandPool, null)
         swapChainFrameBuffers.forEach { vkDestroyFramebuffer(device, it, null) }
         vkDestroyPipeline(device, graphicsPipeline, null)
         vkDestroyPipelineLayout(device, pipelineLayout, null)
@@ -487,6 +493,82 @@ class HelloTriangleApplication {
                     throw RuntimeException("Failed to create framebuffer.")
                 }
                 pFrameBuffer[0]
+            }
+        }
+    }
+
+    private fun createCommandPool() {
+        MemoryStack.stackPush().use { stack ->
+            val queueFamilyIndices = findQueueFamilies(physicalDevice)
+
+            val poolInfo = VkCommandPoolCreateInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO)
+                queueFamilyIndex(queueFamilyIndices.graphicsFamily!!)
+            }
+
+            val pCommandPool = stack.mallocLong(1)
+
+            if (vkCreateCommandPool(device, poolInfo, null, pCommandPool) != VK_SUCCESS) {
+                throw RuntimeException("Failed to create command pool.")
+            }
+
+            commandPool = pCommandPool[0]
+        }
+    }
+
+    private fun createCommandBuffers() {
+        val commandBuffersCount = swapChainFrameBuffers.size
+
+        MemoryStack.stackPush().use { stack ->
+            val allocInfo = VkCommandBufferAllocateInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
+                commandPool(commandPool)
+                level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
+                commandBufferCount(commandBuffersCount)
+            }
+
+            val pCommandBuffers = stack.mallocPointer(commandBuffersCount)
+
+            if (vkAllocateCommandBuffers(device, allocInfo, pCommandBuffers) != VK_SUCCESS) {
+                throw RuntimeException("Failed to allocate command buffers")
+            }
+
+            commandBuffers = pCommandBuffers.asIterable().map { VkCommandBuffer(it, device) }
+
+            val beginInfo = VkCommandBufferBeginInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
+            }
+
+            val renderPassInfo = VkRenderPassBeginInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO)
+                renderPass(renderPass)
+                renderArea(VkRect2D.callocStack(stack).apply {
+                    offset(VkOffset2D.callocStack(stack).set(0, 0))
+                    extent(swapChainExtent)
+                })
+                val clearValues = VkClearValue.callocStack(1, stack)
+                clearValues.color().float32(stack.floats(0f, 0f, 0f, 0f))
+                pClearValues(clearValues)
+            }
+
+            commandBuffers.zip(swapChainFrameBuffers).map { (commandBuffer, swapChainFrameBuffer) ->
+                if (vkBeginCommandBuffer(commandBuffer, beginInfo) != VK_SUCCESS) {
+                    throw RuntimeException("Failed to begin recording command buffer.")
+                }
+                renderPassInfo.framebuffer(swapChainFrameBuffer)
+
+                // ======== BEGIN ===========
+                vkCmdBeginRenderPass(commandBuffer, renderPassInfo, VK_SUBPASS_CONTENTS_INLINE)
+
+                vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline)
+                vkCmdDraw(commandBuffer, 3, 1, 0, 0)
+
+                vkCmdEndRenderPass(commandBuffer)
+                // ======== END ===========
+
+                if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
+                    throw RuntimeException("Failed to record command buffer.")
+                }
             }
         }
     }
