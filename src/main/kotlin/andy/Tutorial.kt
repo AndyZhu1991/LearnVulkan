@@ -32,6 +32,7 @@ class HelloTriangleApplication {
     private var swapChain: Long = 0
     private var swapChainImages: List<Long> = emptyList()
     private var swapChainImageViews: List<Long> = emptyList()
+    private var swapChainFrameBuffers: List<Long> = emptyList()
     private var swapChainImageFormat: Int = 0
     private lateinit var swapChainExtent: VkExtent2D
 
@@ -73,6 +74,7 @@ class HelloTriangleApplication {
         createImageViews()
         createRenderPass()
         createGraphicsPipeline()
+        createFrameBuffers()
     }
 
     private fun mainLoop() {
@@ -224,6 +226,7 @@ class HelloTriangleApplication {
 
     private fun cleanup() {
 
+        swapChainFrameBuffers.forEach { vkDestroyFramebuffer(device, it, null) }
         vkDestroyPipeline(device, graphicsPipeline, null)
         vkDestroyPipelineLayout(device, pipelineLayout, null)
         swapChainImageViews.forEach { vkDestroyImageView(device, it, null) }
@@ -461,6 +464,30 @@ class HelloTriangleApplication {
 
             vertShaderSPIRV.free()
             fragShaderSPIRV.free()
+        }
+    }
+
+    private fun createFrameBuffers() {
+        MemoryStack.stackPush().use { stack ->
+            val attachments = stack.mallocLong(1)
+            val pFrameBuffer = stack.mallocLong(1)
+
+            val frameBufferInfo = VkFramebufferCreateInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO)
+                renderPass(renderPass)
+                width(swapChainExtent.width())
+                height(swapChainExtent.height())
+                layers(1)
+            }
+
+            swapChainFrameBuffers = swapChainImageViews.map { imageView ->
+                attachments.put(0, imageView)
+                frameBufferInfo.pAttachments(attachments)
+                if (vkCreateFramebuffer(device, frameBufferInfo, null, pFrameBuffer) != VK_SUCCESS) {
+                    throw RuntimeException("Failed to create framebuffer.")
+                }
+                pFrameBuffer[0]
+            }
         }
     }
 
