@@ -43,6 +43,10 @@ class HelloTriangleApplication {
     private var commandPool: Long = 0
     private var commandBuffers: List<VkCommandBuffer> = emptyList()
 
+    private var inFlightFrames: List<Frame> = emptyList()
+    private val imagesInFlight: MutableMap<Int, Frame> = HashMap()
+    private var currentFrame: Int = 0
+
     fun run() {
         initWindow()
         initVulkan()
@@ -80,12 +84,16 @@ class HelloTriangleApplication {
         createFrameBuffers()
         createCommandPool()
         createCommandBuffers()
+        createSyncObjects()
     }
 
     private fun mainLoop() {
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents()
+            drawFrame()
         }
+
+        vkDeviceWaitIdle(device)
     }
 
     private fun pickPhysicalDevice() {
@@ -199,7 +207,7 @@ class HelloTriangleApplication {
             for (i in uniqueQueueFamilies.indices) {
                 val queueCreateInfo = queueCreateInfos[i]
                 queueCreateInfo.sType(VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO)
-                queueCreateInfo.queueFamilyIndex(indices.graphicsFamily!!)
+                queueCreateInfo.queueFamilyIndex(uniqueQueueFamilies[i])
                 queueCreateInfo.pQueuePriorities(stack.floats(1.0f))
             }
 
@@ -231,10 +239,18 @@ class HelloTriangleApplication {
 
     private fun cleanup() {
 
+        inFlightFrames.forEach { frame ->
+            vkDestroySemaphore(device, frame.renderFinishedSemaphore, null)
+            vkDestroySemaphore(device, frame.imageAvailableSemaphore, null)
+            vkDestroyFence(device, frame.fence, null)
+        }
+        imagesInFlight.clear()
+
         vkDestroyCommandPool(device, commandPool, null)
         swapChainFrameBuffers.forEach { vkDestroyFramebuffer(device, it, null) }
         vkDestroyPipeline(device, graphicsPipeline, null)
         vkDestroyPipelineLayout(device, pipelineLayout, null)
+        vkDestroyRenderPass(device, renderPass, null)
         swapChainImageViews.forEach { vkDestroyImageView(device, it, null) }
         vkDestroySwapchainKHR(device, swapChain, null)
         vkDestroyDevice(device, null)
@@ -256,7 +272,7 @@ class HelloTriangleApplication {
 
         MemoryStack.stackPush().use { stack ->
             val appInfo = VkApplicationInfo.callocStack(stack).apply {
-                sType(VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO)
+                sType(VK_STRUCTURE_TYPE_APPLICATION_INFO)
                 pApplicationName(stack.UTF8Safe("Hello Triangle."))
                 applicationVersion(VK_MAKE_VERSION(1, 0, 0))
                 pEngineName(stack.UTF8Safe("No Engine"))
@@ -307,7 +323,7 @@ class HelloTriangleApplication {
             val requiredExtensions = stack.mallocPointer(glfwExtensions.capacity() + 1)
             requiredExtensions.put(glfwExtensions)
             requiredExtensions.put(stack.UTF8(VK_EXT_DEBUG_UTILS_EXTENSION_NAME))
-            return requiredExtensions
+            return requiredExtensions.rewind()
         } else {
             return glfwExtensions
         }
@@ -417,8 +433,8 @@ class HelloTriangleApplication {
 
             // COLOR BLENDING
             val colorBlendAttachment = VkPipelineColorBlendAttachmentState.callocStack(1, stack)
-            colorBlendAttachment.colorWriteMask(VK_COLOR_COMPONENT_R_BIT and VK_COLOR_COMPONENT_G_BIT
-                    and VK_COLOR_COMPONENT_B_BIT and VK_COLOR_COMPONENT_A_BIT)
+            colorBlendAttachment.colorWriteMask(VK_COLOR_COMPONENT_R_BIT or VK_COLOR_COMPONENT_G_BIT
+                    or VK_COLOR_COMPONENT_B_BIT or VK_COLOR_COMPONENT_A_BIT)
             colorBlendAttachment.blendEnable(false)
 
             val colorBlending = VkPipelineColorBlendStateCreateInfo.callocStack(stack).apply {
@@ -441,22 +457,21 @@ class HelloTriangleApplication {
 
             pipelineLayout = pPipelineLayout[0]
 
-            val pipelineInfo = VkGraphicsPipelineCreateInfo.callocStack(1, stack).apply {
-                it.sType(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO)
-                it.pStages(shaderStages)
-                it.pVertexInputState(vertexInputInfo)
-                it.pVertexInputState(vertexInputInfo)
-                it.pInputAssemblyState(inputAssembly)
-                it.pViewportState(viewportState)
-                it.pRasterizationState(rasterizer)
-                it.pMultisampleState(multisampling)
-                it.pColorBlendState(colorBlending)
-                it.layout(pipelineLayout)
-                it.renderPass(renderPass)
-                it.subpass(0)
-                it.basePipelineHandle(VK_NULL_HANDLE)
-                it.basePipelineIndex(-1)
-            }
+            val pipelineInfo = VkGraphicsPipelineCreateInfo.callocStack(1, stack)
+            pipelineInfo.sType(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO)
+            pipelineInfo.pStages(shaderStages)
+            pipelineInfo.pVertexInputState(vertexInputInfo)
+            pipelineInfo.pVertexInputState(vertexInputInfo)
+            pipelineInfo.pInputAssemblyState(inputAssembly)
+            pipelineInfo.pViewportState(viewportState)
+            pipelineInfo.pRasterizationState(rasterizer)
+            pipelineInfo.pMultisampleState(multisampling)
+            pipelineInfo.pColorBlendState(colorBlending)
+            pipelineInfo.layout(pipelineLayout)
+            pipelineInfo.renderPass(renderPass)
+            pipelineInfo.subpass(0)
+            pipelineInfo.basePipelineHandle(VK_NULL_HANDLE)
+            pipelineInfo.basePipelineIndex(-1)
 
             val pGraphicsPipeline = stack.mallocLong(1)
             if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, pipelineInfo, null, pGraphicsPipeline) != VK_SUCCESS) {
@@ -547,7 +562,7 @@ class HelloTriangleApplication {
                     extent(swapChainExtent)
                 })
                 val clearValues = VkClearValue.callocStack(1, stack)
-                clearValues.color().float32(stack.floats(0f, 0f, 0f, 0f))
+                clearValues.color().float32(stack.floats(0f, 0f, 0f, 1f))
                 pClearValues(clearValues)
             }
 
@@ -573,6 +588,82 @@ class HelloTriangleApplication {
         }
     }
 
+    private fun createSyncObjects() {
+        MemoryStack.stackPush().use { stack ->
+            val semaphoreInfo = VkSemaphoreCreateInfo.callocStack(stack)
+            semaphoreInfo.sType(VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO)
+
+            val fenceInfo = VkFenceCreateInfo.callocStack(stack)
+            fenceInfo.sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO)
+            fenceInfo.flags(VK_FENCE_CREATE_SIGNALED_BIT)
+
+            val pImageAvailableSemaphore = stack.mallocLong(1)
+            val pRenderFinishedSemaphore = stack.mallocLong(1)
+            val pFence = stack.mallocLong(1)
+
+            inFlightFrames = (0 until MAX_FRAMES_IN_FLIGHT).map { index ->
+                if (vkCreateSemaphore(device, semaphoreInfo, null, pImageAvailableSemaphore) != VK_SUCCESS
+                        || vkCreateSemaphore(device, semaphoreInfo, null, pRenderFinishedSemaphore) != VK_SUCCESS
+                        || vkCreateFence(device, fenceInfo, null, pFence) != VK_SUCCESS) {
+                    throw RuntimeException("Failed to create synchronization objects for the frame $index")
+                }
+                Frame(pImageAvailableSemaphore[0], pRenderFinishedSemaphore[0], pFence[0])
+            }
+        }
+    }
+
+    private fun drawFrame() {
+        MemoryStack.stackPush().use { stack ->
+            val thisFrame = inFlightFrames[currentFrame]
+
+            vkWaitForFences(device, thisFrame.pFence(), true, UINT64_MAX)
+
+            val pImageIndex = stack.mallocInt(1)
+
+            vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, thisFrame.imageAvailableSemaphore, VK_NULL_HANDLE, pImageIndex)
+            val imageIndex = pImageIndex[0]
+
+            if (imagesInFlight.containsKey(imageIndex)) {
+                vkWaitForFences(device, imagesInFlight[imageIndex]!!.fence, true, UINT64_MAX)
+            }
+
+            imagesInFlight[imageIndex] = thisFrame
+
+            val submitInfo = VkSubmitInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
+
+                waitSemaphoreCount(1)
+                pWaitSemaphores(thisFrame.pImageAvailableSemaphore())
+                pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT))
+
+                pSignalSemaphores(thisFrame.pRenderFinishedSemaphore())
+
+                pCommandBuffers(stack.pointers(commandBuffers[imageIndex]))
+            }
+
+            vkResetFences(device, thisFrame.pFence())
+
+            if (vkQueueSubmit(graphicsQueue, submitInfo, thisFrame.fence) != VK_SUCCESS) {
+                throw RuntimeException("Failed to submit draw command buffer")
+            }
+
+            val presentInfo = VkPresentInfoKHR.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_PRESENT_INFO_KHR)
+
+                pWaitSemaphores(thisFrame.pRenderFinishedSemaphore())
+
+                swapchainCount(1)
+                pSwapchains(stack.longs(swapChain))
+
+                pImageIndices(pImageIndex)
+            }
+
+            vkQueuePresentKHR(presentQueue, presentInfo)
+
+            currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT
+        }
+    }
+
     private fun createRenderPass() {
         MemoryStack.stackPush().use { stack ->
             val colorAttachment = VkAttachmentDescription.callocStack(1, stack)
@@ -585,21 +676,28 @@ class HelloTriangleApplication {
             colorAttachment.initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
             colorAttachment.finalLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
 
-            val colorAttachmentRef = VkAttachmentReference.callocStack(1, stack).apply {
-                it.attachment(0)
-                it.layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
-            }
+            val colorAttachmentRef = VkAttachmentReference.callocStack(1, stack)
+            colorAttachmentRef.attachment(0)
+            colorAttachmentRef.layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
 
-            val subpass = VkSubpassDescription.callocStack(1, stack).apply {
-                it.pipelineBindPoint(VK_PIPELINE_BIND_POINT_GRAPHICS)
-                it.colorAttachmentCount(1)
-                it.pColorAttachments(colorAttachmentRef)
-            }
+            val subpass = VkSubpassDescription.callocStack(1, stack)
+            subpass.pipelineBindPoint(VK_PIPELINE_BIND_POINT_GRAPHICS)
+            subpass.colorAttachmentCount(1)
+            subpass.pColorAttachments(colorAttachmentRef)
+
+            val dependency = VkSubpassDependency.callocStack(1, stack)
+            dependency.srcSubpass(VK_SUBPASS_EXTERNAL)
+            dependency.dstSubpass(0)
+            dependency.srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT)
+            dependency.srcAccessMask(0)
+            dependency.dstStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT)
+            dependency.dstAccessMask(VK_ACCESS_COLOR_ATTACHMENT_READ_BIT or VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
 
             val renderPassInfo = VkRenderPassCreateInfo.callocStack(stack).apply {
                 sType(VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO)
                 pAttachments(colorAttachment)
                 pSubpasses(subpass)
+                pDependencies(dependency)
             }
 
             val renderPasses = stack.mallocLong(1)
@@ -708,7 +806,7 @@ class HelloTriangleApplication {
                 throw RuntimeException("Failed to create swap chain")
             }
 
-            val swapChain = pSwapChain[0]
+            swapChain = pSwapChain[0]
             vkGetSwapchainImagesKHR(device, swapChain, imageCount, null)
             val pSwapChainImages = stack.mallocLong(imageCount[0])
             vkGetSwapchainImagesKHR(device, swapChain, imageCount, pSwapChainImages)
@@ -761,11 +859,14 @@ class HelloTriangleApplication {
     companion object {
 
         private const val UINT_MAX = (0xFFFFFFFF).toInt()
+        private const val UINT64_MAX = -0x1L
 
         private const val WIDTH = 800
         private const val HEIGHT = 600
 
-        private val ENABLE_VALIDATION_LAYERS = false //DEBUG.get(true)
+        private const val MAX_FRAMES_IN_FLIGHT = 2
+
+        private val ENABLE_VALIDATION_LAYERS = true //DEBUG.get(true)
         private val VALIDATION_LAYERS = HashSet<String>().apply {
             if (ENABLE_VALIDATION_LAYERS) {
                 add("VK_LAYER_KHRONOS_validation")
