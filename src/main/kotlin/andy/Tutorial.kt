@@ -6,6 +6,7 @@ import org.lwjgl.glfw.GLFWVulkan.glfwCreateWindowSurface
 import org.lwjgl.glfw.GLFWVulkan.glfwGetRequiredInstanceExtensions
 import org.lwjgl.system.MemoryStack
 import org.lwjgl.system.MemoryUtil.NULL
+import org.lwjgl.system.Pointer
 import org.lwjgl.vulkan.*
 import org.lwjgl.vulkan.EXTDebugUtils.*
 import org.lwjgl.vulkan.KHRSurface.*
@@ -47,6 +48,8 @@ class HelloTriangleApplication {
     private val imagesInFlight: MutableMap<Int, Frame> = HashMap()
     private var currentFrame: Int = 0
 
+    private var frameBufferResize: Boolean = false
+
     fun run() {
         initWindow()
         initVulkan()
@@ -60,7 +63,7 @@ class HelloTriangleApplication {
         }
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE)
 
         val title = javaClass.simpleName
 
@@ -69,6 +72,20 @@ class HelloTriangleApplication {
         if (window == NULL) {
             throw RuntimeException("Cannot create window")
         }
+
+        // In Java, we don't really need a user pointer here, because
+        // we can simply pass an instance method reference to glfwSetFramebufferSizeCallback
+        // However, I will show you how can you pass a user pointer to glfw in Java just for learning purposes:
+        // long userPointer = JNINativeInterface.NewGlobalRef(this);
+        // glfwSetWindowUserPointer(window, userPointer);
+        // Please notice that the reference must be freed manually with JNINativeInterface.nDeleteGlobalRef
+        glfwSetFramebufferSizeCallback(window, this::frameBufferResizeCallback)
+    }
+
+    private fun frameBufferResizeCallback(window: Long, width: Int, height: Int) {
+        // HelloTriangleApplication app = MemoryUtil.memGlobalRefToObject(glfwGetWindowUserPointer(window));
+        // app.framebufferResize = true;
+        frameBufferResize = true
     }
 
     private fun initVulkan() {
@@ -77,13 +94,8 @@ class HelloTriangleApplication {
         createSurface()
         pickPhysicalDevice()
         createLogicDevice()
-        createSwapChain()
-        createImageViews()
-        createRenderPass()
-        createGraphicsPipeline()
-        createFrameBuffers()
         createCommandPool()
-        createCommandBuffers()
+        createSwapChainObjects()
         createSyncObjects()
     }
 
@@ -239,6 +251,8 @@ class HelloTriangleApplication {
 
     private fun cleanup() {
 
+        cleanupSwapChain()
+
         inFlightFrames.forEach { frame ->
             vkDestroySemaphore(device, frame.renderFinishedSemaphore, null)
             vkDestroySemaphore(device, frame.imageAvailableSemaphore, null)
@@ -247,12 +261,7 @@ class HelloTriangleApplication {
         imagesInFlight.clear()
 
         vkDestroyCommandPool(device, commandPool, null)
-        swapChainFrameBuffers.forEach { vkDestroyFramebuffer(device, it, null) }
-        vkDestroyPipeline(device, graphicsPipeline, null)
-        vkDestroyPipelineLayout(device, pipelineLayout, null)
-        vkDestroyRenderPass(device, renderPass, null)
-        swapChainImageViews.forEach { vkDestroyImageView(device, it, null) }
-        vkDestroySwapchainKHR(device, swapChain, null)
+
         vkDestroyDevice(device, null)
 
         if (ENABLE_VALIDATION_LAYERS) {
@@ -263,6 +272,16 @@ class HelloTriangleApplication {
         vkDestroyInstance(instance, null)
         glfwDestroyWindow(window)
         glfwTerminate()
+    }
+
+    private fun cleanupSwapChain() {
+        swapChainFrameBuffers.forEach { vkDestroyFramebuffer(device, it, null) }
+        vkFreeCommandBuffers(device, commandPool, commandBuffers.asPointerBuffer())
+        vkDestroyPipeline(device, graphicsPipeline, null)
+        vkDestroyPipelineLayout(device, pipelineLayout, null)
+        vkDestroyRenderPass(device, renderPass, null)
+        swapChainImageViews.forEach { vkDestroyImageView(device, it, null) }
+        vkDestroySwapchainKHR(device, swapChain, null)
     }
 
     private fun createInstance() {
@@ -620,7 +639,12 @@ class HelloTriangleApplication {
 
             val pImageIndex = stack.mallocInt(1)
 
-            vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, thisFrame.imageAvailableSemaphore, VK_NULL_HANDLE, pImageIndex)
+            val acquireImageResult = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, thisFrame.imageAvailableSemaphore, VK_NULL_HANDLE, pImageIndex)
+            if (acquireImageResult == VK_ERROR_OUT_OF_DATE_KHR) {
+                recreateSwapChain()
+                return
+            }
+
             val imageIndex = pImageIndex[0]
 
             if (imagesInFlight.containsKey(imageIndex)) {
@@ -658,7 +682,13 @@ class HelloTriangleApplication {
                 pImageIndices(pImageIndex)
             }
 
-            vkQueuePresentKHR(presentQueue, presentInfo)
+            val queuePresentResult = vkQueuePresentKHR(presentQueue, presentInfo)
+            if (queuePresentResult == VK_ERROR_OUT_OF_DATE_KHR || queuePresentResult == VK_SUBOPTIMAL_KHR || frameBufferResize) {
+                frameBufferResize = false
+                recreateSwapChain()
+            } else if (queuePresentResult != VK_SUCCESS) {
+                throw RuntimeException("Failed to present swap chain image.")
+            }
 
             currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT
         }
@@ -820,6 +850,31 @@ class HelloTriangleApplication {
         }
     }
 
+    private fun recreateSwapChain() {
+        MemoryStack.stackPush().use { stack ->
+            val width = stack.ints(0)
+            val height = stack.ints(0)
+
+            while (width[0] == 0 && height[0] == 0) {
+                glfwGetFramebufferSize(window, width, height)
+                glfwWaitEvents()
+            }
+        }
+
+        vkDeviceWaitIdle(device)
+        cleanupSwapChain()
+        createSwapChainObjects()
+    }
+
+    private fun createSwapChainObjects() {
+        createSwapChain()
+        createImageViews()
+        createRenderPass()
+        createGraphicsPipeline()
+        createFrameBuffers()
+        createCommandBuffers()
+    }
+
     private fun chooseSwapSurfaceFormat(availableFormats: VkSurfaceFormatKHR.Buffer): VkSurfaceFormatKHR {
         return availableFormats
                 .filter { it.format() == VK_FORMAT_B8G8R8_UNORM }
@@ -841,7 +896,11 @@ class HelloTriangleApplication {
             return capabilities.currentExtent()
         }
 
-        val actualExtent = VkExtent2D.mallocStack().set(WIDTH, HEIGHT)
+        val stack = MemoryStack.stackGet()
+        val width = stack.ints(0)
+        val height = stack.ints(0)
+        glfwGetFramebufferSize(window, width, height)
+        val actualExtent = VkExtent2D.mallocStack().set(width[0], height[0])
 
         val minExtent = capabilities.minImageExtent()
         val maxExtent = capabilities.maxImageExtent()
@@ -955,6 +1014,13 @@ internal fun PointerBuffer.asIterable(): Iterable<Long> {
             }
         }
     }
+}
+
+internal fun List<Pointer>.asPointerBuffer(): PointerBuffer {
+    val stack = MemoryStack.stackGet()
+    val buffer = stack.mallocPointer(size)
+    forEach { buffer.put(it) }
+    return buffer.rewind()
 }
 
 fun main() {
