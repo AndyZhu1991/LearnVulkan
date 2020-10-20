@@ -373,8 +373,8 @@ class HelloTriangleApplication {
 
     private fun createGraphicsPipeline() {
         MemoryStack.stackPush().use { stack ->
-            val vertShaderSPIRV = compileShaderFile("shaders/09_shader_base.vert", ShakerKind.VERTEX_SHADER)
-            val fragShaderSPIRV = compileShaderFile("shaders/09_shader_base.frag", ShakerKind.FRAGMENT_SHADER)
+            val vertShaderSPIRV = compileShaderFile("shaders/17_shader_vertexbuffer.vert", ShakerKind.VERTEX_SHADER)
+            val fragShaderSPIRV = compileShaderFile("shaders/17_shader_vertexbuffer.frag", ShakerKind.FRAGMENT_SHADER)
 
             if (vertShaderSPIRV == null || fragShaderSPIRV == null) {
                 throw RuntimeException("Failed to compile shader.")
@@ -404,6 +404,8 @@ class HelloTriangleApplication {
             // VERTEX STAGE
             val vertexInputInfo = VkPipelineVertexInputStateCreateInfo.callocStack(stack)
             vertexInputInfo.sType(VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO)
+            vertexInputInfo.pVertexBindingDescriptions(Vertex.getBindingDescription())
+            vertexInputInfo.pVertexAttributeDescriptions(Vertex.getAttributeDescriptions())
 
             // ASSEMBLE STAGE
             val inputAssembly = VkPipelineInputAssemblyStateCreateInfo.callocStack(stack).apply {
@@ -639,10 +641,13 @@ class HelloTriangleApplication {
 
             val pImageIndex = stack.mallocInt(1)
 
-            val acquireImageResult = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, thisFrame.imageAvailableSemaphore, VK_NULL_HANDLE, pImageIndex)
+            val acquireImageResult = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX,
+                    thisFrame.imageAvailableSemaphore, VK_NULL_HANDLE, pImageIndex)
             if (acquireImageResult == VK_ERROR_OUT_OF_DATE_KHR) {
                 recreateSwapChain()
                 return
+            } else if (acquireImageResult != VK_SUCCESS) {
+                throw RuntimeException("Cannot get image")
             }
 
             val imageIndex = pImageIndex[0]
@@ -668,6 +673,7 @@ class HelloTriangleApplication {
             vkResetFences(device, thisFrame.pFence())
 
             if (vkQueueSubmit(graphicsQueue, submitInfo, thisFrame.fence) != VK_SUCCESS) {
+                vkResetFences(device, thisFrame.pFence())
                 throw RuntimeException("Failed to submit draw command buffer")
             }
 

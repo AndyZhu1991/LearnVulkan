@@ -26,6 +26,7 @@ dependencies {
     implementation("org.lwjgl", "lwjgl-stb")
     implementation("org.lwjgl", "lwjgl-vulkan")
     implementation("org.lwjgl", "lwjgl-shaderc")
+    implementation("org.joml", "joml", version = "1.9.2")
     runtimeOnly("org.lwjgl", "lwjgl", classifier = lwjglNatives)
     runtimeOnly("org.lwjgl", "lwjgl-assimp", classifier = lwjglNatives)
     runtimeOnly("org.lwjgl", "lwjgl-glfw", classifier = lwjglNatives)
