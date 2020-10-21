@@ -41,6 +41,9 @@ class HelloTriangleApplication {
     private var pipelineLayout: Long = 0
     private var graphicsPipeline: Long = 0
 
+    private var vertexBuffer: Long = 0
+    private var vertexBufferMemory: Long = 0
+
     private var commandPool: Long = 0
     private var commandBuffers: List<VkCommandBuffer> = emptyList()
 
@@ -95,6 +98,7 @@ class HelloTriangleApplication {
         pickPhysicalDevice()
         createLogicDevice()
         createCommandPool()
+        createVertexBuffer()
         createSwapChainObjects()
         createSyncObjects()
     }
@@ -252,6 +256,9 @@ class HelloTriangleApplication {
     private fun cleanup() {
 
         cleanupSwapChain()
+
+        vkDestroyBuffer(device, vertexBuffer, null)
+        vkFreeMemory(device, vertexBufferMemory, null)
 
         inFlightFrames.forEach { frame ->
             vkDestroySemaphore(device, frame.renderFinishedSemaphore, null)
@@ -597,7 +604,10 @@ class HelloTriangleApplication {
                 vkCmdBeginRenderPass(commandBuffer, renderPassInfo, VK_SUBPASS_CONTENTS_INLINE)
 
                 vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline)
-                vkCmdDraw(commandBuffer, 3, 1, 0, 0)
+                val vertexBuffers = stack.longs(vertexBuffer)
+                val offsets = stack.longs(0)
+                vkCmdBindVertexBuffers(commandBuffer, 0, vertexBuffers, offsets)
+                vkCmdDraw(commandBuffer, Vertex.VERTICES.size, 1, 0, 0)
 
                 vkCmdEndRenderPass(commandBuffer)
                 // ======== END ===========
@@ -607,6 +617,72 @@ class HelloTriangleApplication {
                 }
             }
         }
+    }
+
+    private fun createVertexBuffer() {
+        MemoryStack.stackPush().use { stack ->
+            val bufferInfo = VkBufferCreateInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
+                size((Vertex.SIZEOF * Vertex.VERTICES.size).toLong())
+                usage(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+                sharingMode(VK_SHARING_MODE_EXCLUSIVE)
+            }
+
+            val pVertexBuffer = stack.mallocLong(1)
+            if (vkCreateBuffer(device, bufferInfo, null, pVertexBuffer) != VK_SUCCESS) {
+                throw RuntimeException("Failed to create vertex buffer")
+            }
+            vertexBuffer = pVertexBuffer[0]
+
+            val memRequirements = VkMemoryRequirements.mallocStack(stack)
+            vkGetBufferMemoryRequirements(device, vertexBuffer, memRequirements)
+
+            val allocInfo = VkMemoryAllocateInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
+                allocationSize(memRequirements.size())
+                val memoryProperties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+                memoryTypeIndex(findMemoryType(memRequirements.memoryTypeBits(), memoryProperties))
+            }
+
+            val pVertexBufferMemory = stack.mallocLong(1)
+            if (vkAllocateMemory(device, allocInfo, null, pVertexBufferMemory) != VK_SUCCESS) {
+                throw RuntimeException("Failed to allocate vertex buffer memory")
+            }
+            vertexBufferMemory = pVertexBufferMemory[0]
+
+            vkBindBufferMemory(device, vertexBuffer, vertexBufferMemory, 0)
+
+            val data = stack.mallocPointer(1)
+
+            vkMapMemory(device, vertexBufferMemory, 0, bufferInfo.size(), 0, data)
+            memcpy(data.getByteBuffer(0, bufferInfo.size().toInt()), Vertex.VERTICES)
+            vkUnmapMemory(device, vertexBufferMemory)
+        }
+    }
+
+    private fun memcpy(buffer: ByteBuffer, vertices: Array<Vertex>) {
+        vertices.forEach {
+            buffer.putFloat(it.pos.x())
+            buffer.putFloat(it.pos.y())
+
+            buffer.putFloat(it.color.x())
+            buffer.putFloat(it.color.y())
+            buffer.putFloat(it.color.z())
+        }
+    }
+
+    private fun findMemoryType(typeFilter: Int, properties: Int): Int {
+        val memProperties = VkPhysicalDeviceMemoryProperties.mallocStack()
+        vkGetPhysicalDeviceMemoryProperties(physicalDevice, memProperties)
+
+        for (i in 0 until memProperties.memoryTypeCount()) {
+            if ((typeFilter and 1 shl i) != 0 &&
+                    (memProperties.memoryTypes(i).propertyFlags() and properties) == properties) {
+                return i
+            }
+        }
+
+        throw RuntimeException("Failed to find suitable memory type.")
     }
 
     private fun createSyncObjects() {

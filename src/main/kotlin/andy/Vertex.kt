@@ -8,12 +8,12 @@ import org.lwjgl.vulkan.VK10.*
 import org.lwjgl.vulkan.VkVertexInputAttributeDescription
 import org.lwjgl.vulkan.VkVertexInputBindingDescription
 
-class Vertex(private val pos: Vector2fc, private val color: Vector3fc) {
+class Vertex(val pos: Vector2fc, val color: Vector3fc) {
 
     companion object {
 
         private const val SIZEOF_FLOAT = 4
-        private const val SIZEOF = (2 + 3) * SIZEOF_FLOAT
+        const val SIZEOF = (2 + 3) * SIZEOF_FLOAT
         private const val OFFSETOF_POS = 0
         private const val OFFSETOF_COLOR = 2 * SIZEOF_FLOAT
 
@@ -47,7 +47,7 @@ class Vertex(private val pos: Vector2fc, private val color: Vector3fc) {
             return attributeDescriptions
         }
 
-        private val VERTICES = arrayOf(
+        val VERTICES = arrayOf(
                 Vertex(Vector2f(0.0f, -0.5f), Vector3f(1.0f, 0.0f, 0.0f)),
                 Vertex(Vector2f(0.5f,  0.5f), Vector3f(0.0f, 1.0f, 0.0f)),
                 Vertex(Vector2f(-0.5f, 0.5f), Vector3f(0.0f, 0.0f, 1.0f))

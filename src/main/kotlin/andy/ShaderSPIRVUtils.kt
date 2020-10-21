@@ -60,7 +60,7 @@ fun compileShader(fileName: String, source: String, shaderKind: ShakerKind): SPI
     }
 
     if (shaderc_result_get_compilation_status(result) != shaderc_compilation_status_success) {
-        throw RuntimeException("Failed to compile shader " + fileName + "into SPIR-V:\n " + shaderc_result_get_error_message(result))
+        throw RuntimeException("Failed to compile shader " + fileName + " into SPIR-V:\n " + shaderc_result_get_error_message(result))
     }
 
     shaderc_compiler_release(compiler)
