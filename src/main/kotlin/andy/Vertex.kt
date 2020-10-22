@@ -46,11 +46,5 @@ class Vertex(val pos: Vector2fc, val color: Vector3fc) {
 
             return attributeDescriptions
         }
-
-        val VERTICES = arrayOf(
-                Vertex(Vector2f(0.0f, -0.5f), Vector3f(1.0f, 0.0f, 0.0f)),
-                Vertex(Vector2f(0.5f,  0.5f), Vector3f(0.0f, 1.0f, 0.0f)),
-                Vertex(Vector2f(-0.5f, 0.5f), Vector3f(0.0f, 0.0f, 1.0f))
-        )
     }
 }

@@ -1,5 +1,7 @@
 package andy
 
+import org.joml.Vector2f
+import org.joml.Vector3f
 import org.lwjgl.PointerBuffer
 import org.lwjgl.glfw.GLFW.*
 import org.lwjgl.glfw.GLFWVulkan.glfwCreateWindowSurface
@@ -607,7 +609,7 @@ class HelloTriangleApplication {
                 val vertexBuffers = stack.longs(vertexBuffer)
                 val offsets = stack.longs(0)
                 vkCmdBindVertexBuffers(commandBuffer, 0, vertexBuffers, offsets)
-                vkCmdDraw(commandBuffer, Vertex.VERTICES.size, 1, 0, 0)
+                vkCmdDraw(commandBuffer, VERTICES.size, 1, 0, 0)
 
                 vkCmdEndRenderPass(commandBuffer)
                 // ======== END ===========
@@ -619,44 +621,112 @@ class HelloTriangleApplication {
         }
     }
 
-    private fun createVertexBuffer() {
+    private fun createBuffer(size: Long, usage: Int, properties: Int, pBuffer: LongBuffer, pBufferMemory: LongBuffer) {
         MemoryStack.stackPush().use { stack ->
             val bufferInfo = VkBufferCreateInfo.callocStack(stack).apply {
                 sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
-                size((Vertex.SIZEOF * Vertex.VERTICES.size).toLong())
-                usage(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+                size(size)
+                usage(usage)
                 sharingMode(VK_SHARING_MODE_EXCLUSIVE)
             }
 
-            val pVertexBuffer = stack.mallocLong(1)
-            if (vkCreateBuffer(device, bufferInfo, null, pVertexBuffer) != VK_SUCCESS) {
-                throw RuntimeException("Failed to create vertex buffer")
+            if (vkCreateBuffer(device, bufferInfo, null, pBuffer) != VK_SUCCESS) {
+                throw RuntimeException("Failed to create buffer")
             }
-            vertexBuffer = pVertexBuffer[0]
 
             val memRequirements = VkMemoryRequirements.mallocStack(stack)
-            vkGetBufferMemoryRequirements(device, vertexBuffer, memRequirements)
+            vkGetBufferMemoryRequirements(device, pBuffer[0], memRequirements)
 
             val allocInfo = VkMemoryAllocateInfo.callocStack(stack).apply {
                 sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
                 allocationSize(memRequirements.size())
-                val memoryProperties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-                memoryTypeIndex(findMemoryType(memRequirements.memoryTypeBits(), memoryProperties))
+                memoryTypeIndex(findMemoryType(memRequirements.memoryTypeBits(), properties))
             }
 
-            val pVertexBufferMemory = stack.mallocLong(1)
-            if (vkAllocateMemory(device, allocInfo, null, pVertexBufferMemory) != VK_SUCCESS) {
-                throw RuntimeException("Failed to allocate vertex buffer memory")
+            if (vkAllocateMemory(device, allocInfo, null, pBufferMemory) != VK_SUCCESS) {
+                throw RuntimeException("Failed to allocate buffer memory")
             }
-            vertexBufferMemory = pVertexBufferMemory[0]
 
-            vkBindBufferMemory(device, vertexBuffer, vertexBufferMemory, 0)
+            vkBindBufferMemory(device, pBuffer[0], pBufferMemory[0], 0)
+        }
+    }
+
+    private fun createVertexBuffer() {
+        MemoryStack.stackPush().use { stack ->
+            val bufferSize = (Vertex.SIZEOF * VERTICES.size).toLong()
+            val pBuffer = stack.mallocLong(1)
+            val pBufferMemory = stack.mallocLong(1)
+            createBuffer(
+                    bufferSize,
+                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                    pBuffer,
+                    pBufferMemory
+            )
+
+            val stagingBuffer = pBuffer[0]
+            val stagingBufferMemory = pBufferMemory[0]
 
             val data = stack.mallocPointer(1)
 
-            vkMapMemory(device, vertexBufferMemory, 0, bufferInfo.size(), 0, data)
-            memcpy(data.getByteBuffer(0, bufferInfo.size().toInt()), Vertex.VERTICES)
-            vkUnmapMemory(device, vertexBufferMemory)
+            vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, data)
+            memcpy(data.getByteBuffer(0, bufferSize.toInt()), VERTICES)
+            vkUnmapMemory(device, stagingBufferMemory)
+
+            createBuffer(
+                    bufferSize,
+                    VK_BUFFER_USAGE_TRANSFER_DST_BIT or VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                    VK_MEMORY_HEAP_DEVICE_LOCAL_BIT,
+                    pBuffer,
+                    pBufferMemory
+            )
+
+            vertexBuffer = pBuffer[0]
+            vertexBufferMemory = pBufferMemory[0]
+
+            copyBuffer(stagingBuffer, vertexBuffer, bufferSize)
+
+            vkDestroyBuffer(device, stagingBuffer, null)
+            vkFreeMemory(device, stagingBufferMemory, null)
+        }
+    }
+
+    private fun copyBuffer(srcBuffer: Long, dstBuffer: Long, size: Long) {
+        MemoryStack.stackPush().use { stack ->
+
+            val allocInfo = VkCommandBufferAllocateInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
+                level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
+                commandPool(commandPool)
+                commandBufferCount(1)
+            }
+
+            val pCommandBuffer = stack.mallocPointer(1)
+            vkAllocateCommandBuffers(device, allocInfo, pCommandBuffer)
+            val commandBuffer = VkCommandBuffer(pCommandBuffer[0], device)
+
+            val beginInfo = VkCommandBufferBeginInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
+                flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
+            }
+
+            vkBeginCommandBuffer(commandBuffer, beginInfo)
+            val copyRegion = VkBufferCopy.callocStack(1, stack)
+            copyRegion.size(size)
+            vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, copyRegion)
+            vkEndCommandBuffer(commandBuffer)
+
+            val submitInfo = VkSubmitInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
+                pCommandBuffers(pCommandBuffer)
+            }
+
+            if (vkQueueSubmit(graphicsQueue, submitInfo, VK_NULL_HANDLE) != VK_SUCCESS) {
+                throw RuntimeException("Failed to submit copy command buffer")
+            }
+
+            vkQueueWaitIdle(graphicsQueue)
+            vkFreeCommandBuffers(device, commandPool, pCommandBuffer)
         }
     }
 
@@ -1016,6 +1086,12 @@ class HelloTriangleApplication {
         }
 
         private val DEVICE_EXTENSIONS = setOf(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
+
+        val VERTICES = arrayOf(
+                Vertex(Vector2f(0.0f, -0.5f), Vector3f(1.0f, 0.0f, 0.0f)),
+                Vertex(Vector2f(0.5f,  0.5f), Vector3f(0.0f, 1.0f, 0.0f)),
+                Vertex(Vector2f(-0.5f, 0.5f), Vector3f(0.0f, 0.0f, 1.0f))
+        )
 
         private fun asPointBuffer(strings: Collection<String>): PointerBuffer {
             val stack = MemoryStack.stackGet()
