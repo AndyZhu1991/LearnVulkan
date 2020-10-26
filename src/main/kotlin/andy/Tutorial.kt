@@ -46,6 +46,9 @@ class HelloTriangleApplication {
     private var vertexBuffer: Long = 0
     private var vertexBufferMemory: Long = 0
 
+    private var indexBuffer: Long = 0
+    private var indexBufferMemory: Long = 0
+
     private var commandPool: Long = 0
     private var commandBuffers: List<VkCommandBuffer> = emptyList()
 
@@ -101,6 +104,7 @@ class HelloTriangleApplication {
         createLogicDevice()
         createCommandPool()
         createVertexBuffer()
+        createIndexBuffer()
         createSwapChainObjects()
         createSyncObjects()
     }
@@ -258,6 +262,9 @@ class HelloTriangleApplication {
     private fun cleanup() {
 
         cleanupSwapChain()
+
+        vkDestroyBuffer(device, indexBuffer, null)
+        vkFreeMemory(device, indexBufferMemory, null)
 
         vkDestroyBuffer(device, vertexBuffer, null)
         vkFreeMemory(device, vertexBufferMemory, null)
@@ -609,7 +616,8 @@ class HelloTriangleApplication {
                 val vertexBuffers = stack.longs(vertexBuffer)
                 val offsets = stack.longs(0)
                 vkCmdBindVertexBuffers(commandBuffer, 0, vertexBuffers, offsets)
-                vkCmdDraw(commandBuffer, VERTICES.size, 1, 0, 0)
+                vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16)
+                vkCmdDrawIndexed(commandBuffer, INDICES.size, 1, 0, 0, 0)
 
                 vkCmdEndRenderPass(commandBuffer)
                 // ======== END ===========
@@ -691,6 +699,46 @@ class HelloTriangleApplication {
         }
     }
 
+    private fun createIndexBuffer() {
+        MemoryStack.stackPush().use { stack ->
+            val bufferSize = (2 * INDICES.size).toLong()
+            val pBuffer = stack.mallocLong(1)
+            val pBufferMemory = stack.mallocLong(1)
+            createBuffer(
+                    bufferSize,
+                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                    pBuffer,
+                    pBufferMemory
+            )
+
+            val stagingBuffer = pBuffer[0]
+            val stagingBufferMemory = pBufferMemory[0]
+
+            val data = stack.mallocPointer(1)
+
+            vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, data)
+            memcpy(data.getByteBuffer(0, bufferSize.toInt()), INDICES)
+            vkUnmapMemory(device, stagingBufferMemory)
+
+            createBuffer(
+                    bufferSize,
+                    VK_BUFFER_USAGE_TRANSFER_DST_BIT or VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                    VK_MEMORY_HEAP_DEVICE_LOCAL_BIT,
+                    pBuffer,
+                    pBufferMemory
+            )
+
+            indexBuffer = pBuffer[0]
+            indexBufferMemory = pBufferMemory[0]
+
+            copyBuffer(stagingBuffer, indexBuffer, bufferSize)
+
+            vkDestroyBuffer(device, stagingBuffer, null)
+            vkFreeMemory(device, stagingBufferMemory, null)
+        }
+    }
+
     private fun copyBuffer(srcBuffer: Long, dstBuffer: Long, size: Long) {
         MemoryStack.stackPush().use { stack ->
 
@@ -739,6 +787,13 @@ class HelloTriangleApplication {
             buffer.putFloat(it.color.y())
             buffer.putFloat(it.color.z())
         }
+    }
+
+    private fun memcpy(buffer: ByteBuffer, shorts: ShortArray) {
+        shorts.forEach {
+            buffer.putShort(it)
+        }
+        buffer.rewind()
     }
 
     private fun findMemoryType(typeFilter: Int, properties: Int): Int {
@@ -1087,10 +1142,15 @@ class HelloTriangleApplication {
 
         private val DEVICE_EXTENSIONS = setOf(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
 
-        val VERTICES = arrayOf(
-                Vertex(Vector2f(0.0f, -0.5f), Vector3f(1.0f, 0.0f, 0.0f)),
-                Vertex(Vector2f(0.5f,  0.5f), Vector3f(0.0f, 1.0f, 0.0f)),
-                Vertex(Vector2f(-0.5f, 0.5f), Vector3f(0.0f, 0.0f, 1.0f))
+        private val VERTICES = arrayOf(
+                Vertex(Vector2f(-0.5f, -0.5f), Vector3f(1.0f, 0.0f, 0.0f)),
+                Vertex(Vector2f( 0.5f, -0.5f), Vector3f(0.0f, 1.0f, 0.0f)),
+                Vertex(Vector2f( 0.5f,  0.5f), Vector3f(0.0f, 0.0f, 1.0f)),
+                Vertex(Vector2f(-0.5f,  0.5f), Vector3f(1.0f, 1.0f, 1.0f))
+        )
+
+        private val INDICES = shortArrayOf(
+                0, 1, 2, 2, 3, 0
         )
 
         private fun asPointBuffer(strings: Collection<String>): PointerBuffer {
