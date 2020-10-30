@@ -40,6 +40,7 @@ class HelloTriangleApplication {
     private lateinit var swapChainExtent: VkExtent2D
 
     private var renderPass: Long = 0
+    private var descriptorSetLayout: Long = 0
     private var pipelineLayout: Long = 0
     private var graphicsPipeline: Long = 0
 
@@ -48,6 +49,9 @@ class HelloTriangleApplication {
 
     private var indexBuffer: Long = 0
     private var indexBufferMemory: Long = 0
+
+    private var uniformBuffers: List<Long> = emptyList()
+    private var uniformBufferMemory: List<Long> = emptyList()
 
     private var commandPool: Long = 0
     private var commandBuffers: List<VkCommandBuffer> = emptyList()
@@ -71,7 +75,6 @@ class HelloTriangleApplication {
         }
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE)
 
         val title = javaClass.simpleName
 
@@ -105,6 +108,7 @@ class HelloTriangleApplication {
         createCommandPool()
         createVertexBuffer()
         createIndexBuffer()
+        createDescriptorSetLayout()
         createSwapChainObjects()
         createSyncObjects()
     }
@@ -263,6 +267,8 @@ class HelloTriangleApplication {
 
         cleanupSwapChain()
 
+        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, null)
+
         vkDestroyBuffer(device, indexBuffer, null)
         vkFreeMemory(device, indexBufferMemory, null)
 
@@ -291,6 +297,8 @@ class HelloTriangleApplication {
     }
 
     private fun cleanupSwapChain() {
+        uniformBuffers.forEach { vkDestroyBuffer(device, it, null) }
+        uniformBufferMemory.forEach { vkFreeMemory(device, it, null) }
         swapChainFrameBuffers.forEach { vkDestroyFramebuffer(device, it, null) }
         vkFreeCommandBuffers(device, commandPool, commandBuffers.asPointerBuffer())
         vkDestroyPipeline(device, graphicsPipeline, null)
@@ -389,8 +397,8 @@ class HelloTriangleApplication {
 
     private fun createGraphicsPipeline() {
         MemoryStack.stackPush().use { stack ->
-            val vertShaderSPIRV = compileShaderFile("shaders/17_shader_vertexbuffer.vert", ShakerKind.VERTEX_SHADER)
-            val fragShaderSPIRV = compileShaderFile("shaders/17_shader_vertexbuffer.frag", ShakerKind.FRAGMENT_SHADER)
+            val vertShaderSPIRV = compileShaderFile("shaders/21_shader_ubo.vert", ShakerKind.VERTEX_SHADER)
+            val fragShaderSPIRV = compileShaderFile("shaders/21_shader_ubo.frag", ShakerKind.FRAGMENT_SHADER)
 
             if (vertShaderSPIRV == null || fragShaderSPIRV == null) {
                 throw RuntimeException("Failed to compile shader.")
@@ -485,6 +493,7 @@ class HelloTriangleApplication {
             // PIPELINE LAYOUT CREATION
             val pipelineLayoutInfo = VkPipelineLayoutCreateInfo.callocStack(stack)
             pipelineLayoutInfo.sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
+            pipelineLayoutInfo.pSetLayouts(stack.longs(descriptorSetLayout))
 
             val pPipelineLayout = stack.longs(VK_NULL_HANDLE)
 
@@ -739,6 +748,30 @@ class HelloTriangleApplication {
         }
     }
 
+    private fun createUniformBuffers() {
+        MemoryStack.stackPush().use { stack ->
+            val uniformBuffers = mutableListOf<Long>()
+            val uniformBufferMemory = mutableListOf<Long>()
+            val pBuffer = stack.mallocLong(1)
+            val pBufferMemory = stack.mallocLong(1)
+
+            repeat(swapChainImages.size) {
+                createBuffer(
+                        UniformBufferObject.SIZEOF,
+                        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                        pBuffer,
+                        pBufferMemory
+                )
+                uniformBuffers.add(pBuffer[0])
+                uniformBufferMemory.add(pBufferMemory[0])
+            }
+
+            this.uniformBuffers = uniformBuffers
+            this.uniformBufferMemory = uniformBufferMemory
+        }
+    }
+
     private fun copyBuffer(srcBuffer: Long, dstBuffer: Long, size: Long) {
         MemoryStack.stackPush().use { stack ->
 
@@ -796,6 +829,13 @@ class HelloTriangleApplication {
         buffer.rewind()
     }
 
+    private fun memcpy(buffer: ByteBuffer, ubo: UniformBufferObject) {
+        val mat4size = 16 * 4
+        ubo.model.get(0, buffer)
+        ubo.view.get(mat4size, buffer)
+        ubo.proj.get(mat4size * 2, buffer)
+    }
+
     private fun findMemoryType(typeFilter: Int, properties: Int): Int {
         val memProperties = VkPhysicalDeviceMemoryProperties.mallocStack()
         vkGetPhysicalDeviceMemoryProperties(physicalDevice, memProperties)
@@ -834,6 +874,26 @@ class HelloTriangleApplication {
         }
     }
 
+    private fun updateUniformBuffer(currentImage: Int) {
+        MemoryStack.stackPush().use { stack ->
+            val ubo = UniformBufferObject().apply {
+                model.rotate((glfwGetTime() * Math.toRadians(90.0)).toFloat(), 0f, 0f, 1f)
+                view.lookAt(2f, 2f, 2f, 0f, 0f, 0f, 0f, 0f, 1f)
+                proj.perspective(
+                        Math.toRadians(45.0).toFloat(),
+                        swapChainExtent.width().toFloat() / swapChainExtent.height(),
+                        0.1f,
+                        10f)
+                proj.m11(proj.m11() * -1)
+            }
+
+            val data = stack.mallocPointer(1)
+            vkMapMemory(device, uniformBufferMemory[currentImage], 0, UniformBufferObject.SIZEOF, 0, data)
+            memcpy(data.getByteBuffer(0, UniformBufferObject.SIZEOF.toInt()), ubo)
+            vkUnmapMemory(device, uniformBufferMemory[currentImage])
+        }
+    }
+
     private fun drawFrame() {
         MemoryStack.stackPush().use { stack ->
             val thisFrame = inFlightFrames[currentFrame]
@@ -852,6 +912,8 @@ class HelloTriangleApplication {
             }
 
             val imageIndex = pImageIndex[0]
+
+            updateUniformBuffer(imageIndex)
 
             if (imagesInFlight.containsKey(imageIndex)) {
                 vkWaitForFences(device, imagesInFlight[imageIndex]!!.fence, true, UINT64_MAX)
@@ -943,6 +1005,28 @@ class HelloTriangleApplication {
             }
 
             renderPass = renderPasses[0]
+        }
+    }
+
+    private fun createDescriptorSetLayout() {
+        MemoryStack.stackPush().use { stack ->
+            val uboLayoutBinding = VkDescriptorSetLayoutBinding.callocStack(1, stack)
+            uboLayoutBinding.binding(0)
+            uboLayoutBinding.descriptorCount(1)
+            uboLayoutBinding.descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+            uboLayoutBinding.pImmutableSamplers(null)
+            uboLayoutBinding.stageFlags(VK_SHADER_STAGE_VERTEX_BIT)
+
+            val layoutInfo = VkDescriptorSetLayoutCreateInfo.callocStack(stack)
+            layoutInfo.sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO)
+            layoutInfo.pBindings(uboLayoutBinding)
+
+            val pDescriptorSetLayout = stack.mallocLong(1)
+
+            if (vkCreateDescriptorSetLayout(device, layoutInfo, null, pDescriptorSetLayout) != VK_SUCCESS) {
+                throw RuntimeException("Failed to create descriptor set layout.")
+            }
+            descriptorSetLayout = pDescriptorSetLayout[0]
         }
     }
 
@@ -1079,6 +1163,7 @@ class HelloTriangleApplication {
         createRenderPass()
         createGraphicsPipeline()
         createFrameBuffers()
+        createUniformBuffers()
         createCommandBuffers()
     }
 
