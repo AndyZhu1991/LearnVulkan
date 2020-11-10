@@ -40,7 +40,9 @@ class HelloTriangleApplication {
     private lateinit var swapChainExtent: VkExtent2D
 
     private var renderPass: Long = 0
+    private var descriptorPool: Long = 0
     private var descriptorSetLayout: Long = 0
+    private var descriptorSets: List<Long> = emptyList()
     private var pipelineLayout: Long = 0
     private var graphicsPipeline: Long = 0
 
@@ -299,6 +301,7 @@ class HelloTriangleApplication {
     private fun cleanupSwapChain() {
         uniformBuffers.forEach { vkDestroyBuffer(device, it, null) }
         uniformBufferMemory.forEach { vkFreeMemory(device, it, null) }
+        vkDestroyDescriptorPool(device, descriptorPool, null)
         swapChainFrameBuffers.forEach { vkDestroyFramebuffer(device, it, null) }
         vkFreeCommandBuffers(device, commandPool, commandBuffers.asPointerBuffer())
         vkDestroyPipeline(device, graphicsPipeline, null)
@@ -465,7 +468,7 @@ class HelloTriangleApplication {
                 polygonMode(VK_POLYGON_MODE_FILL)
                 lineWidth(1f)
                 cullMode(VK_CULL_MODE_BACK_BIT)
-                frontFace(VK_FRONT_FACE_CLOCKWISE)
+                frontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
                 depthBiasEnable(false)
             }
 
@@ -612,7 +615,10 @@ class HelloTriangleApplication {
                 pClearValues(clearValues)
             }
 
-            commandBuffers.zip(swapChainFrameBuffers).map { (commandBuffer, swapChainFrameBuffer) ->
+            for (i in 0 until commandBuffersCount) {
+                val commandBuffer = commandBuffers[i]
+                val swapChainFrameBuffer = swapChainFrameBuffers[i]
+
                 if (vkBeginCommandBuffer(commandBuffer, beginInfo) != VK_SUCCESS) {
                     throw RuntimeException("Failed to begin recording command buffer.")
                 }
@@ -626,6 +632,8 @@ class HelloTriangleApplication {
                 val offsets = stack.longs(0)
                 vkCmdBindVertexBuffers(commandBuffer, 0, vertexBuffers, offsets)
                 vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16)
+                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        pipelineLayout, 0, stack.longs(descriptorSets[i]), null)
                 vkCmdDrawIndexed(commandBuffer, INDICES.size, 1, 0, 0, 0)
 
                 vkCmdEndRenderPass(commandBuffer)
@@ -634,6 +642,68 @@ class HelloTriangleApplication {
                 if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
                     throw RuntimeException("Failed to record command buffer.")
                 }
+            }
+        }
+    }
+
+    private fun createDescriptorPool() {
+        MemoryStack.stackPush().use { stack ->
+            val poolSize = VkDescriptorPoolSize.callocStack(1, stack)
+            poolSize.type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+            poolSize.descriptorCount(swapChainImages.size)
+
+            val poolInfo = VkDescriptorPoolCreateInfo.callocStack().apply {
+                sType(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO)
+                pPoolSizes(poolSize)
+                maxSets(swapChainImages.size)
+            }
+
+            val pDescriptorPool = stack.mallocLong(1)
+
+            if (vkCreateDescriptorPool(device, poolInfo, null, pDescriptorPool) != VK_SUCCESS) {
+                throw RuntimeException("Failed to create descriptor info.")
+            }
+
+            descriptorPool = pDescriptorPool[0]
+        }
+    }
+
+    private fun createDescriptorSets() {
+        MemoryStack.stackPush().use { stack ->
+            val layouts = stack.mallocLong(swapChainImages.size)
+            for (i in 0 until layouts.capacity()) {
+                layouts.put(i, descriptorSetLayout)
+            }
+
+            val allocInfo = VkDescriptorSetAllocateInfo.callocStack(stack).apply {
+                sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO)
+                descriptorPool(descriptorPool)
+                pSetLayouts(layouts)
+            }
+
+            val pDescriptorSets = stack.mallocLong(swapChainImages.size)
+
+            if (vkAllocateDescriptorSets(device, allocInfo, pDescriptorSets) != VK_SUCCESS) {
+                throw RuntimeException("Failed to allocate descriptor sets.")
+            }
+
+            val bufferInfo = VkDescriptorBufferInfo.callocStack(1, stack)
+            bufferInfo.offset(0)
+            bufferInfo.range(UniformBufferObject.SIZEOF)
+
+            val descriptorWrite = VkWriteDescriptorSet.callocStack(1, stack)
+            descriptorWrite.sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+            descriptorWrite.dstBinding(0)
+            descriptorWrite.dstArrayElement(0)
+            descriptorWrite.descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+            descriptorWrite.descriptorCount(1)
+            descriptorWrite.pBufferInfo(bufferInfo)
+
+            descriptorSets = pDescriptorSets.asIterable().mapIndexed { index, descriptorSet ->
+                bufferInfo.buffer(uniformBuffers[index])
+                descriptorWrite.dstSet(descriptorSet)
+                vkUpdateDescriptorSets(device, descriptorWrite, null)
+                descriptorSet
             }
         }
     }
@@ -832,8 +902,8 @@ class HelloTriangleApplication {
     private fun memcpy(buffer: ByteBuffer, ubo: UniformBufferObject) {
         val mat4size = 16 * 4
         ubo.model.get(0, buffer)
-        ubo.view.get(mat4size, buffer)
-        ubo.proj.get(mat4size * 2, buffer)
+        ubo.view.get(alignas(mat4size, alignof(ubo.view)), buffer)
+        ubo.proj.get(alignas(mat4size * 2, alignof(ubo.view)), buffer)
     }
 
     private fun findMemoryType(typeFilter: Int, properties: Int): Int {
@@ -1164,6 +1234,8 @@ class HelloTriangleApplication {
         createGraphicsPipeline()
         createFrameBuffers()
         createUniformBuffers()
+        createDescriptorPool()
+        createDescriptorSets()
         createCommandBuffers()
     }
 
@@ -1302,6 +1374,24 @@ class HelloTriangleApplication {
 }
 
 internal fun PointerBuffer.asIterable(): Iterable<Long> {
+    return object : Iterable<Long> {
+        override fun iterator() = object : Iterator<Long> {
+            private var index = 0
+            override fun hasNext() = index < capacity()
+            override fun next(): Long {
+                if (index < capacity()) {
+                    val result = get(index)
+                    index++
+                    return result
+                } else {
+                    throw NoSuchElementException(index.toString())
+                }
+            }
+        }
+    }
+}
+
+internal fun LongBuffer.asIterable(): Iterable<Long> {
     return object : Iterable<Long> {
         override fun iterator() = object : Iterator<Long> {
             private var index = 0
