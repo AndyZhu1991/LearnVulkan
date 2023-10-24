@@ -169,7 +169,7 @@ class HelloTriangleApplication {
         MemoryStack.stackPush().use { stack ->
             val extensionCount = stack.ints(0)
             vkEnumerateDeviceExtensionProperties(device, null as String?, extensionCount, null)
-            val availableExtensions = VkExtensionProperties.mallocStack(extensionCount[0], stack)
+            val availableExtensions = VkExtensionProperties.malloc(extensionCount[0], stack)
             vkEnumerateDeviceExtensionProperties(device, null as String?, extensionCount, availableExtensions)
             return availableExtensions
                     .map { it.extensionNameString() }
@@ -180,13 +180,13 @@ class HelloTriangleApplication {
     private fun querySwapChainSupport(device: VkPhysicalDevice, stack: MemoryStack): SwapChainSupportDetails {
         val details = SwapChainSupportDetails()
 
-        details.capabilities = VkSurfaceCapabilitiesKHR.mallocStack(stack)
+        details.capabilities = VkSurfaceCapabilitiesKHR.malloc(stack)
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, details.capabilities)
 
         val count = stack.ints(0)
         vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, count, null)
         if (count[0] != 0) {
-            details.formats = VkSurfaceFormatKHR.mallocStack(count[0], stack)
+            details.formats = VkSurfaceFormatKHR.malloc(count[0], stack)
             vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, count, details.formats)
         }
 
@@ -203,7 +203,7 @@ class HelloTriangleApplication {
         MemoryStack.stackPush().use { stack ->
             val queueFamilyCount = stack.ints(0)
             vkGetPhysicalDeviceQueueFamilyProperties(device, queueFamilyCount, null)
-            val queueFamilies = VkQueueFamilyProperties.mallocStack(queueFamilyCount[0], stack)
+            val queueFamilies = VkQueueFamilyProperties.malloc(queueFamilyCount[0], stack)
             vkGetPhysicalDeviceQueueFamilyProperties(device, queueFamilyCount, queueFamilies)
 
             val indices = QueueFamilyIndices()
@@ -230,7 +230,7 @@ class HelloTriangleApplication {
             val indices = findQueueFamilies(physicalDevice)
             val uniqueQueueFamilies = indices.unique()
 
-            val queueCreateInfos = VkDeviceQueueCreateInfo.callocStack(uniqueQueueFamilies.size, stack)
+            val queueCreateInfos = VkDeviceQueueCreateInfo.calloc(uniqueQueueFamilies.size, stack)
 
             for (i in uniqueQueueFamilies.indices) {
                 val queueCreateInfo = queueCreateInfos[i]
@@ -239,8 +239,8 @@ class HelloTriangleApplication {
                 queueCreateInfo.pQueuePriorities(stack.floats(1.0f))
             }
 
-            val deviceFeatures = VkPhysicalDeviceFeatures.callocStack(stack)
-            val createInfo = VkDeviceCreateInfo.callocStack(stack).apply {
+            val deviceFeatures = VkPhysicalDeviceFeatures.calloc(stack)
+            val createInfo = VkDeviceCreateInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO)
                 pQueueCreateInfos(queueCreateInfos)
                 pEnabledFeatures(deviceFeatures)
@@ -317,7 +317,7 @@ class HelloTriangleApplication {
         }
 
         MemoryStack.stackPush().use { stack ->
-            val appInfo = VkApplicationInfo.callocStack(stack).apply {
+            val appInfo = VkApplicationInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_APPLICATION_INFO)
                 pApplicationName(stack.UTF8Safe("Hello Triangle."))
                 applicationVersion(VK_MAKE_VERSION(1, 0, 0))
@@ -326,13 +326,13 @@ class HelloTriangleApplication {
                 apiVersion(VK_API_VERSION_1_0)
             }
 
-            val createInfo = VkInstanceCreateInfo.callocStack(stack).apply {
+            val createInfo = VkInstanceCreateInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO)
                 pApplicationInfo(appInfo)
                 ppEnabledExtensionNames(getRequiredExtensions())
                 if (ENABLE_VALIDATION_LAYERS) {
                     ppEnabledLayerNames(asPointBuffer(VALIDATION_LAYERS))
-                    val debugCreateInfo = VkDebugUtilsMessengerCreateInfoEXT.callocStack(stack)
+                    val debugCreateInfo = VkDebugUtilsMessengerCreateInfoEXT.calloc(stack)
                     populateDebugMessengerCreateInfo(debugCreateInfo)
                     pNext(debugCreateInfo.address())
                 } else {
@@ -353,7 +353,7 @@ class HelloTriangleApplication {
         MemoryStack.stackPush().use { stack ->
             val layerCount = stack.ints(1)
             vkEnumerateInstanceLayerProperties(layerCount, null)
-            val availableLayers = VkLayerProperties.mallocStack(layerCount[0], stack)
+            val availableLayers = VkLayerProperties.malloc(layerCount[0], stack)
             vkEnumerateInstanceLayerProperties(layerCount, availableLayers)
 
             return availableLayers
@@ -388,7 +388,7 @@ class HelloTriangleApplication {
         }
 
         MemoryStack.stackPush().use { stack ->
-            val createInfo = VkDebugUtilsMessengerCreateInfoEXT.callocStack(stack)
+            val createInfo = VkDebugUtilsMessengerCreateInfoEXT.calloc(stack)
             populateDebugMessengerCreateInfo(createInfo)
             val pDebugMessenger = stack.longs(VK_NULL_HANDLE)
             if (createDebugUtilsMessengerEXT(instance, createInfo, null, pDebugMessenger) != VK_SUCCESS) {
@@ -412,7 +412,7 @@ class HelloTriangleApplication {
 
             val entryPoint = stack.UTF8("main")
 
-            val shaderStages = VkPipelineShaderStageCreateInfo.callocStack(2, stack)
+            val shaderStages = VkPipelineShaderStageCreateInfo.calloc(2, stack)
 
             val vertShaderStageInfo = shaderStages[0].apply {
                 sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
@@ -429,20 +429,20 @@ class HelloTriangleApplication {
             }
 
             // VERTEX STAGE
-            val vertexInputInfo = VkPipelineVertexInputStateCreateInfo.callocStack(stack)
+            val vertexInputInfo = VkPipelineVertexInputStateCreateInfo.calloc(stack)
             vertexInputInfo.sType(VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO)
             vertexInputInfo.pVertexBindingDescriptions(Vertex.getBindingDescription())
             vertexInputInfo.pVertexAttributeDescriptions(Vertex.getAttributeDescriptions())
 
             // ASSEMBLE STAGE
-            val inputAssembly = VkPipelineInputAssemblyStateCreateInfo.callocStack(stack).apply {
+            val inputAssembly = VkPipelineInputAssemblyStateCreateInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO)
                 topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
                 primitiveRestartEnable(false)
             }
 
             // VIEWPORT & SCISSOR
-            val viewport = VkViewport.callocStack(1, stack)
+            val viewport = VkViewport.calloc(1, stack)
             viewport.x(0f)
             viewport.y(0f)
             viewport.width(swapChainExtent.width().toFloat())
@@ -450,18 +450,18 @@ class HelloTriangleApplication {
             viewport.minDepth(0f)
             viewport.maxDepth(1f)
 
-            val scissor = VkRect2D.callocStack(1, stack)
-            scissor.offset(VkOffset2D.callocStack(stack).set(0, 0))
+            val scissor = VkRect2D.calloc(1, stack)
+            scissor.offset(VkOffset2D.calloc(stack).set(0, 0))
             scissor.extent(swapChainExtent)
 
-            val viewportState = VkPipelineViewportStateCreateInfo.callocStack(stack).apply {
+            val viewportState = VkPipelineViewportStateCreateInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO)
                 pViewports(viewport)
                 pScissors(scissor)
             }
 
             // RASTERIZATION STAGE
-            val rasterizer = VkPipelineRasterizationStateCreateInfo.callocStack(stack).apply {
+            val rasterizer = VkPipelineRasterizationStateCreateInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO)
                 depthClampEnable(false)
                 rasterizerDiscardEnable(false)
@@ -473,19 +473,19 @@ class HelloTriangleApplication {
             }
 
             // MULTISAMPLING
-            val multisampling = VkPipelineMultisampleStateCreateInfo.callocStack(stack).apply {
+            val multisampling = VkPipelineMultisampleStateCreateInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO)
                 sampleShadingEnable(false)
                 rasterizationSamples(VK_SAMPLE_COUNT_1_BIT)
             }
 
             // COLOR BLENDING
-            val colorBlendAttachment = VkPipelineColorBlendAttachmentState.callocStack(1, stack)
+            val colorBlendAttachment = VkPipelineColorBlendAttachmentState.calloc(1, stack)
             colorBlendAttachment.colorWriteMask(VK_COLOR_COMPONENT_R_BIT or VK_COLOR_COMPONENT_G_BIT
                     or VK_COLOR_COMPONENT_B_BIT or VK_COLOR_COMPONENT_A_BIT)
             colorBlendAttachment.blendEnable(false)
 
-            val colorBlending = VkPipelineColorBlendStateCreateInfo.callocStack(stack).apply {
+            val colorBlending = VkPipelineColorBlendStateCreateInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO)
                 logicOpEnable(false)
                 logicOp(VK_LOGIC_OP_COPY)
@@ -494,7 +494,7 @@ class HelloTriangleApplication {
             }
 
             // PIPELINE LAYOUT CREATION
-            val pipelineLayoutInfo = VkPipelineLayoutCreateInfo.callocStack(stack)
+            val pipelineLayoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
             pipelineLayoutInfo.sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
             pipelineLayoutInfo.pSetLayouts(stack.longs(descriptorSetLayout))
 
@@ -506,7 +506,7 @@ class HelloTriangleApplication {
 
             pipelineLayout = pPipelineLayout[0]
 
-            val pipelineInfo = VkGraphicsPipelineCreateInfo.callocStack(1, stack)
+            val pipelineInfo = VkGraphicsPipelineCreateInfo.calloc(1, stack)
             pipelineInfo.sType(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO)
             pipelineInfo.pStages(shaderStages)
             pipelineInfo.pVertexInputState(vertexInputInfo)
@@ -542,7 +542,7 @@ class HelloTriangleApplication {
             val attachments = stack.mallocLong(1)
             val pFrameBuffer = stack.mallocLong(1)
 
-            val frameBufferInfo = VkFramebufferCreateInfo.callocStack(stack).apply {
+            val frameBufferInfo = VkFramebufferCreateInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO)
                 renderPass(renderPass)
                 width(swapChainExtent.width())
@@ -565,7 +565,7 @@ class HelloTriangleApplication {
         MemoryStack.stackPush().use { stack ->
             val queueFamilyIndices = findQueueFamilies(physicalDevice)
 
-            val poolInfo = VkCommandPoolCreateInfo.callocStack(stack).apply {
+            val poolInfo = VkCommandPoolCreateInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO)
                 queueFamilyIndex(queueFamilyIndices.graphicsFamily!!)
             }
@@ -584,7 +584,7 @@ class HelloTriangleApplication {
         val commandBuffersCount = swapChainFrameBuffers.size
 
         MemoryStack.stackPush().use { stack ->
-            val allocInfo = VkCommandBufferAllocateInfo.callocStack(stack).apply {
+            val allocInfo = VkCommandBufferAllocateInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
                 commandPool(commandPool)
                 level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
@@ -599,18 +599,18 @@ class HelloTriangleApplication {
 
             commandBuffers = pCommandBuffers.asIterable().map { VkCommandBuffer(it, device) }
 
-            val beginInfo = VkCommandBufferBeginInfo.callocStack(stack).apply {
+            val beginInfo = VkCommandBufferBeginInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
             }
 
-            val renderPassInfo = VkRenderPassBeginInfo.callocStack(stack).apply {
+            val renderPassInfo = VkRenderPassBeginInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO)
                 renderPass(renderPass)
-                renderArea(VkRect2D.callocStack(stack).apply {
-                    offset(VkOffset2D.callocStack(stack).set(0, 0))
+                renderArea(VkRect2D.calloc(stack).apply {
+                    offset(VkOffset2D.calloc(stack).set(0, 0))
                     extent(swapChainExtent)
                 })
-                val clearValues = VkClearValue.callocStack(1, stack)
+                val clearValues = VkClearValue.calloc(1, stack)
                 clearValues.color().float32(stack.floats(0f, 0f, 0f, 1f))
                 pClearValues(clearValues)
             }
@@ -648,11 +648,11 @@ class HelloTriangleApplication {
 
     private fun createDescriptorPool() {
         MemoryStack.stackPush().use { stack ->
-            val poolSize = VkDescriptorPoolSize.callocStack(1, stack)
+            val poolSize = VkDescriptorPoolSize.calloc(1, stack)
             poolSize.type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
             poolSize.descriptorCount(swapChainImages.size)
 
-            val poolInfo = VkDescriptorPoolCreateInfo.callocStack().apply {
+            val poolInfo = VkDescriptorPoolCreateInfo.calloc().apply {
                 sType(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO)
                 pPoolSizes(poolSize)
                 maxSets(swapChainImages.size)
@@ -675,7 +675,7 @@ class HelloTriangleApplication {
                 layouts.put(i, descriptorSetLayout)
             }
 
-            val allocInfo = VkDescriptorSetAllocateInfo.callocStack(stack).apply {
+            val allocInfo = VkDescriptorSetAllocateInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO)
                 descriptorPool(descriptorPool)
                 pSetLayouts(layouts)
@@ -687,11 +687,11 @@ class HelloTriangleApplication {
                 throw RuntimeException("Failed to allocate descriptor sets.")
             }
 
-            val bufferInfo = VkDescriptorBufferInfo.callocStack(1, stack)
+            val bufferInfo = VkDescriptorBufferInfo.calloc(1, stack)
             bufferInfo.offset(0)
             bufferInfo.range(UniformBufferObject.SIZEOF)
 
-            val descriptorWrite = VkWriteDescriptorSet.callocStack(1, stack)
+            val descriptorWrite = VkWriteDescriptorSet.calloc(1, stack)
             descriptorWrite.sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
             descriptorWrite.dstBinding(0)
             descriptorWrite.dstArrayElement(0)
@@ -710,7 +710,7 @@ class HelloTriangleApplication {
 
     private fun createBuffer(size: Long, usage: Int, properties: Int, pBuffer: LongBuffer, pBufferMemory: LongBuffer) {
         MemoryStack.stackPush().use { stack ->
-            val bufferInfo = VkBufferCreateInfo.callocStack(stack).apply {
+            val bufferInfo = VkBufferCreateInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
                 size(size)
                 usage(usage)
@@ -721,10 +721,10 @@ class HelloTriangleApplication {
                 throw RuntimeException("Failed to create buffer")
             }
 
-            val memRequirements = VkMemoryRequirements.mallocStack(stack)
+            val memRequirements = VkMemoryRequirements.malloc(stack)
             vkGetBufferMemoryRequirements(device, pBuffer[0], memRequirements)
 
-            val allocInfo = VkMemoryAllocateInfo.callocStack(stack).apply {
+            val allocInfo = VkMemoryAllocateInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
                 allocationSize(memRequirements.size())
                 memoryTypeIndex(findMemoryType(memRequirements.memoryTypeBits(), properties))
@@ -845,7 +845,7 @@ class HelloTriangleApplication {
     private fun copyBuffer(srcBuffer: Long, dstBuffer: Long, size: Long) {
         MemoryStack.stackPush().use { stack ->
 
-            val allocInfo = VkCommandBufferAllocateInfo.callocStack(stack).apply {
+            val allocInfo = VkCommandBufferAllocateInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
                 level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
                 commandPool(commandPool)
@@ -856,18 +856,18 @@ class HelloTriangleApplication {
             vkAllocateCommandBuffers(device, allocInfo, pCommandBuffer)
             val commandBuffer = VkCommandBuffer(pCommandBuffer[0], device)
 
-            val beginInfo = VkCommandBufferBeginInfo.callocStack(stack).apply {
+            val beginInfo = VkCommandBufferBeginInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
                 flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
             }
 
             vkBeginCommandBuffer(commandBuffer, beginInfo)
-            val copyRegion = VkBufferCopy.callocStack(1, stack)
+            val copyRegion = VkBufferCopy.calloc(1, stack)
             copyRegion.size(size)
             vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, copyRegion)
             vkEndCommandBuffer(commandBuffer)
 
-            val submitInfo = VkSubmitInfo.callocStack(stack).apply {
+            val submitInfo = VkSubmitInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
                 pCommandBuffers(pCommandBuffer)
             }
@@ -907,7 +907,7 @@ class HelloTriangleApplication {
     }
 
     private fun findMemoryType(typeFilter: Int, properties: Int): Int {
-        val memProperties = VkPhysicalDeviceMemoryProperties.mallocStack()
+        val memProperties = VkPhysicalDeviceMemoryProperties.malloc()
         vkGetPhysicalDeviceMemoryProperties(physicalDevice, memProperties)
 
         for (i in 0 until memProperties.memoryTypeCount()) {
@@ -922,10 +922,10 @@ class HelloTriangleApplication {
 
     private fun createSyncObjects() {
         MemoryStack.stackPush().use { stack ->
-            val semaphoreInfo = VkSemaphoreCreateInfo.callocStack(stack)
+            val semaphoreInfo = VkSemaphoreCreateInfo.calloc(stack)
             semaphoreInfo.sType(VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO)
 
-            val fenceInfo = VkFenceCreateInfo.callocStack(stack)
+            val fenceInfo = VkFenceCreateInfo.calloc(stack)
             fenceInfo.sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO)
             fenceInfo.flags(VK_FENCE_CREATE_SIGNALED_BIT)
 
@@ -991,7 +991,7 @@ class HelloTriangleApplication {
 
             imagesInFlight[imageIndex] = thisFrame
 
-            val submitInfo = VkSubmitInfo.callocStack(stack).apply {
+            val submitInfo = VkSubmitInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
 
                 waitSemaphoreCount(1)
@@ -1010,7 +1010,7 @@ class HelloTriangleApplication {
                 throw RuntimeException("Failed to submit draw command buffer")
             }
 
-            val presentInfo = VkPresentInfoKHR.callocStack(stack).apply {
+            val presentInfo = VkPresentInfoKHR.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_PRESENT_INFO_KHR)
 
                 pWaitSemaphores(thisFrame.pRenderFinishedSemaphore())
@@ -1035,7 +1035,7 @@ class HelloTriangleApplication {
 
     private fun createRenderPass() {
         MemoryStack.stackPush().use { stack ->
-            val colorAttachment = VkAttachmentDescription.callocStack(1, stack)
+            val colorAttachment = VkAttachmentDescription.calloc(1, stack)
             colorAttachment.format(swapChainImageFormat)
             colorAttachment.samples(VK_SAMPLE_COUNT_1_BIT)
             colorAttachment.loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR)
@@ -1045,16 +1045,16 @@ class HelloTriangleApplication {
             colorAttachment.initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
             colorAttachment.finalLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
 
-            val colorAttachmentRef = VkAttachmentReference.callocStack(1, stack)
+            val colorAttachmentRef = VkAttachmentReference.calloc(1, stack)
             colorAttachmentRef.attachment(0)
             colorAttachmentRef.layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
 
-            val subpass = VkSubpassDescription.callocStack(1, stack)
+            val subpass = VkSubpassDescription.calloc(1, stack)
             subpass.pipelineBindPoint(VK_PIPELINE_BIND_POINT_GRAPHICS)
             subpass.colorAttachmentCount(1)
             subpass.pColorAttachments(colorAttachmentRef)
 
-            val dependency = VkSubpassDependency.callocStack(1, stack)
+            val dependency = VkSubpassDependency.calloc(1, stack)
             dependency.srcSubpass(VK_SUBPASS_EXTERNAL)
             dependency.dstSubpass(0)
             dependency.srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT)
@@ -1062,7 +1062,7 @@ class HelloTriangleApplication {
             dependency.dstStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT)
             dependency.dstAccessMask(VK_ACCESS_COLOR_ATTACHMENT_READ_BIT or VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
 
-            val renderPassInfo = VkRenderPassCreateInfo.callocStack(stack).apply {
+            val renderPassInfo = VkRenderPassCreateInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO)
                 pAttachments(colorAttachment)
                 pSubpasses(subpass)
@@ -1080,14 +1080,14 @@ class HelloTriangleApplication {
 
     private fun createDescriptorSetLayout() {
         MemoryStack.stackPush().use { stack ->
-            val uboLayoutBinding = VkDescriptorSetLayoutBinding.callocStack(1, stack)
+            val uboLayoutBinding = VkDescriptorSetLayoutBinding.calloc(1, stack)
             uboLayoutBinding.binding(0)
             uboLayoutBinding.descriptorCount(1)
             uboLayoutBinding.descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
             uboLayoutBinding.pImmutableSamplers(null)
             uboLayoutBinding.stageFlags(VK_SHADER_STAGE_VERTEX_BIT)
 
-            val layoutInfo = VkDescriptorSetLayoutCreateInfo.callocStack(stack)
+            val layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
             layoutInfo.sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO)
             layoutInfo.pBindings(uboLayoutBinding)
 
@@ -1102,7 +1102,7 @@ class HelloTriangleApplication {
 
     private fun createShaderModule(spirvCode: ByteBuffer): Long {
         MemoryStack.stackPush().use { stack ->
-            val createInfo = VkShaderModuleCreateInfo.callocStack(stack).apply {
+            val createInfo = VkShaderModuleCreateInfo.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO)
                 pCode(spirvCode)
             }
@@ -1121,7 +1121,7 @@ class HelloTriangleApplication {
         MemoryStack.stackPush().use { stack ->
             val pImageView = stack.mallocLong(1)
             swapChainImageViews = swapChainImages.map { swapChainImage ->
-                val createInfo = VkImageViewCreateInfo.callocStack(stack).apply {
+                val createInfo = VkImageViewCreateInfo.calloc(stack).apply {
                     sType(VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO)
                     image(swapChainImage)
                     viewType(VK_IMAGE_VIEW_TYPE_2D)
@@ -1163,7 +1163,7 @@ class HelloTriangleApplication {
                 imageCount.put(0, swapChainSupportDetails.capabilities.maxImageCount())
             }
 
-            val createInfo = VkSwapchainCreateInfoKHR.callocStack(stack).apply {
+            val createInfo = VkSwapchainCreateInfoKHR.calloc(stack).apply {
                 sType(VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR)
                 surface(surface)
 
@@ -1264,7 +1264,7 @@ class HelloTriangleApplication {
         val width = stack.ints(0)
         val height = stack.ints(0)
         glfwGetFramebufferSize(window, width, height)
-        val actualExtent = VkExtent2D.mallocStack().set(width[0], height[0])
+        val actualExtent = VkExtent2D.malloc().set(width[0], height[0])
 
         val minExtent = capabilities.minImageExtent()
         val maxExtent = capabilities.maxImageExtent()
